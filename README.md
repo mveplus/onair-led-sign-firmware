@@ -1,0 +1,165 @@
+# ESP32-C6 On-Air LED Sign Firmware
+
+Firmware for an ESP32‑C6 board (default: Seeed XIAO ESP32‑C6) that provides a captive setup portal, a small HTTP API, OTA updates, and a configurable output pin with optional breathing (PWM) mode.
+
+This repo contains a single Arduino sketch plus an API contract document.
+
+## Features
+
+- Captive setup portal for Wi‑Fi provisioning (AP+STA).
+- HTTP API to read status and control an output pin.
+- OTA firmware updates at `/update`.
+- mDNS advertising of the configured hostname.
+- Factory reset via BOOT long‑press (5s).
+- Optional breathing output mode using PWM.
+
+## Project Layout
+
+- `esp32c6-led-sign-firmware.ino` — main firmware sketch
+- `API.md` — API contract and endpoints
+
+## Hardware Defaults
+
+- Board name: `XIAO-ESP32-C6`
+- Built‑in LED: `LED_BUILTIN` (defaults to GPIO8 if not defined by core)
+- BOOT button pin: GPIO9
+- Default output pin: GPIO6
+- LED polarity: active HIGH by default (configurable)
+
+## Wiring Diagram (FGP30N06L, Same USB-C Supply)
+
+Low-side switch using an N-channel MOSFET. The LED sign and ESP32‑C6 board share the same USB‑C 5V supply.
+
+```
+USB-C 5V
+  +5V --------------------+---------------------+
+                          |                     |
+                      LED SIGN (+)          ESP32-C6 5V
+                          |                     |
+LED SIGN (-) -------> DRAIN  FGP30N06L          |
+                     SOURCE --------------------+---- GND (common)
+
+ESP32-C6 GPIO (Output pin, default GPIO6)
+  |
+  +--[100-220R]--> GATE (FGP30N06L)
+  |
+ [10k]
+  |
+ GND
+```
+
+Notes:
+
+- The ESP32‑C6 is 3.3V logic. Verify the FGP30N06L fully enhances at 3.3V gate drive; if not, use a logic‑level MOSFET or a gate driver.
+- The gate pulldown (10k) keeps the MOSFET off during boot/reset.
+- Use a small series gate resistor (100–220 ohm) to reduce ringing.
+- If your LED sign is inductive, add a flyback diode across the load (anode to MOSFET drain, cathode to +5V).
+- Always share ground between the board, MOSFET, and LED sign power.
+
+## Setup Workflow (First Boot)
+
+1. Device boots and tries saved Wi‑Fi credentials.
+2. If none or connection fails, it starts a setup AP + captive portal.
+3. Join the AP and configure Wi‑Fi, hostname, output pin, auth, etc.
+
+### Setup AP Details
+
+- SSID: `C6-SETUP-<MAC12>` (12 hex characters from the device MAC).
+- Password:
+  - Generated once and stored in Preferences.
+  - Format: `<word>-<word>-NN` (easy to type, WPA2/WPA3 compliant).
+  - Can be set to empty for an open AP (via setup UI).
+- Captive portal auto‑scans networks; manual/hidden SSID supported.
+
+### Setup AP Timeout
+
+- Default timeout: 10 minutes.
+- If still in setup mode after timeout, the device reboots and retries STA.
+
+## Connected Mode UI
+
+When connected to Wi‑Fi (STA):
+
+- Root page shows status, toggle controls, breathing settings, and OTA entry.
+- mDNS is advertised as `http://<hostname>.local/`.
+
+## Output Control
+
+Output modes:
+
+- `off`
+- `on`
+- `breathing` (PWM; configurable period/min/max)
+
+Breathing defaults:
+
+- Period: 3000 ms
+- Min: 5%
+- Max: 100%
+
+Allowed ranges:
+
+- `period_ms`: 500–10000
+- `min_pct`: 1–99
+- `max_pct`: 1–100 (must be > min)
+
+## Authentication
+
+All API and OTA endpoints require auth:
+
+- HTTP Basic Auth using configured admin user/password.
+- Or API token via:
+  - `X-API-Token: <token>`
+  - `Authorization: Bearer <token>`
+  - `?token=<token>`
+
+Token behavior:
+
+- Generated after the first successful STA connection.
+- Stored in Preferences and displayed on the connected UI page.
+
+## API
+
+See `API.md` for full details.
+
+Quick endpoints:
+
+- `GET /api/status`
+- `GET /api/set?state=0|1`
+- `GET /api/mode?mode=off|on|breathing[&period_ms=...&min_pct=...&max_pct=...]`
+- `GET /api/config`
+
+## OTA Updates
+
+- `GET /update` serves the upload form (STA mode only).
+- `POST /update` accepts a compiled `.bin`, then reboots.
+- OTA is disabled while in setup (AP) mode.
+
+## Factory Reset
+
+- Hold BOOT for ~5 seconds.
+- LED blinks while holding, then resets stored config and reboots.
+
+## Build & Flash (Arduino IDE)
+
+1. Open `esp32c6-led-sign-firmware.ino`.
+2. Select an ESP32‑C6 board (tested with XIAO ESP32‑C6).
+3. Install required libraries:
+   - ESPAsyncWebServer v3.9.4
+   - AsyncTCP v3.4.10 (Arduino IDE built‑in via Library Manager)
+   - ArduinoJson v6.x (Arduino IDE built‑in via Library Manager)
+4. Compile and upload.
+
+## Optional BLE Provisioning
+
+BLE provisioning is compile‑time gated:
+
+- Set `ENABLE_BLE_PROV` to `1`.
+- Requires `WiFiProv.h` availability in your core/toolchain.
+- AP portal remains the primary provisioning path.
+
+## Notes / Troubleshooting
+
+- If the output pin is set to the built‑in LED, the LED polarity setting matters.
+- PWM breathing requires a PWM‑capable GPIO.
+- If you see “OTA disabled in setup mode”, connect the device to Wi‑Fi first.
