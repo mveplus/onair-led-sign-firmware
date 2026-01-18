@@ -11,5 +11,7 @@ docker run --rm \
   -e FQBN \
   -e SKETCH \
   -e OUT_DIR \
+  -e GIT_SHA \
+  -e BUILD_DATE \
   "$IMAGE" \
   /workspace/scripts/build.sh
