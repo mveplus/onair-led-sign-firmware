@@ -70,6 +70,39 @@ Notes:
   - Can be set to empty for an open AP (via setup UI).
 - Captive portal auto‑scans networks; manual/hidden SSID supported.
 
+## Serial Setup Log (Find SSID + QR)
+
+After flashing, you can read the setup AP SSID/password and QR URL over serial.
+
+1. Connect over USB.
+2. Start the monitor:
+
+```bash
+arduino-cli monitor -p /dev/ttyACM0 -c baudrate=115200
+```
+
+Alternative: use `screen` (no auto-reset toggles):
+
+```bash
+screen /dev/ttyACM0 115200
+```
+
+Exit `screen` with `Ctrl-A` then `K` (confirm with `y`).
+
+Example output (trimmed):
+
+```
+Connecting to /dev/ttyACM0. Press CTRL-C to exit.
+AP SSID (full): C6-SETUP-0AFEFF043254
+AP PASS: ridge-olive-99
+AP IP:   192.168.4.1
+WiFi QR payload (copy-paste into QR generator):
+WIFI:T:WPA;S:C6-SETUP-0AFEFF043254;P:ridge-olive-99;H:false;;
+WiFi QR URL (QuickChart, size=500): https://quickchart.io/qr?text=WIFI%3AT%3AWPA%3BS%3AC6-SETUP-0AFEFF043254%3BP%3Aridge-olive-99%3BH%3Afalse%3B%3B&size=500
+```
+
+Use the SSID/password to join the setup AP, or open the QR URL on your phone to connect quickly.
+
 ### Setup AP Timeout
 
 - Default timeout: 10 minutes.
