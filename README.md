@@ -103,6 +103,8 @@ WiFi QR URL (QuickChart, size=500): https://quickchart.io/qr?text=WIFI%3AT%3AWPA
 
 Use the SSID/password to join the setup AP, or open the QR URL on your phone to connect quickly.
 
+Tip: After reflashing firmware, it’s often best to **factory reset** (hold BOOT for ~5 seconds) so the device clears old Wi‑Fi/settings and restarts cleanly.
+
 ### Setup AP Timeout
 
 - Default timeout: 10 minutes.
