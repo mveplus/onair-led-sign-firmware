@@ -1,4 +1,7 @@
 static const char* BOARD_NAME = "XIAO-ESP32-C6";
+#ifndef FW_VERSION
+#define FW_VERSION "dev"
+#endif
 /*
 ================================================================================
  ESP32-C6 Setup Portal + API + OTA + Factory Reset
@@ -622,6 +625,7 @@ String connectedPage() {
 
   String body;
   body += "<p><span class='ok'>Connected</span> • IP <b>" + htmlEscape(ip) + "</b> • mDNS <b>" + htmlEscape(host) + ".local</b></p>";
+  body += "<p class='hint'>FW: <code>" + htmlEscape(FW_VERSION) + "</code></p>";
   body += "<div class='btns' style='margin-top:16px'>"
           "<button id='btnOn' class='secondary' onclick='toggle(1)'>ON</button>"
           "<button id='btnOff' class='secondary' onclick='toggle(0)'>OFF</button>"
@@ -637,7 +641,7 @@ String connectedPage() {
   body += "<div class='btns'><button id='btnBreathApply' class='secondary' onclick='setBreathing()'>Apply breathing settings</button></div>";
   body += "</details>";
   body += "<details class='section'><summary class='hint'>API access</summary>";
-  body += "<p>API: <code>/api/status</code>, <code>/api/set?state=1</code>, <code>/api/config</code> • OTA: <code>/update</code></p>";
+  body += "<p>API: <code>/api/status</code>, <code>/api/set?state=1</code>, <code>/api/config</code>, <code>/api/reboot</code> • OTA: <code>/update</code></p>";
   body += "<p>Breathing: <code>/api/mode?mode=breathing&period_ms=3000&min_pct=5&max_pct=100</code></p>";
   body += "<p>API token: <code id='tok'>" + htmlEscape(token) + "</code> <button id='btnCopy' class='secondary' onclick='copyToken()'>Copy</button></p>";
   body += "</details>";
@@ -755,6 +759,12 @@ void doFactoryReset() {
   ledWrite(true);
   clearConfig();
   delay(300);
+  ESP.restart();
+}
+
+void scheduleReboot(uint32_t delayMs = 200) {
+  Serial.println("Reboot requested.");
+  delay(delayMs);
   ESP.restart();
 }
 
@@ -1106,6 +1116,7 @@ void setupHttpHandlers() {
     doc["ip"] = portalMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
     doc["ssid"] = portalMode ? apSsid : WiFi.SSID();
     doc["hostname"] = loadString("host", defaultHostName().c_str());
+    doc["fw_version"] = FW_VERSION;
     doc["out_pin"] = loadInt("out", 6);
     doc["led_active_high"] = loadBool("ledah", true);
     doc["output_mode"] = outputMode == MODE_BREATHING ? "breathing" : (outputMode == MODE_ON ? "on" : "off");
@@ -1229,6 +1240,13 @@ void setupHttpHandlers() {
     String out;
     serializeJson(doc, out);
     request->send(200, "application/json", out);
+  });
+
+  server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!ensureApiAuth(request)) return;
+    request->send(200, "application/json", "{\"ok\":true,\"rebooting\":true}");
+    delay(200);
+    ESP.restart();
   });
 
   // -------- OTA (/update) --------
