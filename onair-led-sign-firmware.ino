@@ -124,6 +124,11 @@ static int lastScanCount = -2; // -2 means "never started"
 static uint32_t lastScanStartedMs = 0;
 static const uint32_t SCAN_MAX_WAIT_MS = 6000;
 
+// ---------------- Delayed reboot ----------------
+static bool rebootPending = false;
+static uint32_t rebootAtMs = 0;
+static bool otaUpdateOk = false;
+
 // ---------------- Helpers ----------------
 
 void ledWrite(bool on) {
@@ -415,7 +420,7 @@ void captiveRedirect(AsyncWebServerRequest *request) {
 
 // ---------------- UI (clean + minimal) ----------------
 
-String pageShell(const String& title, const String& body, const String& script = "") {
+String pageShell(const String& title, const String& body, const String& script = "", bool titleInline = false) {
   String h;
   h.reserve(9000);
   h += "<!doctype html><html><head><meta charset='utf-8'/>"
@@ -449,10 +454,15 @@ String pageShell(const String& title, const String& body, const String& script =
        "50%{transform:translateY(-1px);box-shadow:0 0 0 6px rgba(94,234,212,.08)}"
        "100%{transform:translateY(0);box-shadow:0 0 0 0 rgba(94,234,212,.25)}}"
        "button.busy{animation:pulse .8s ease-in-out infinite}"
+       ".spinner{width:18px;height:18px;border-radius:50%;border:2px solid rgba(169,183,214,.35);"
+       "border-top-color:rgba(94,234,212,.9);animation:spin 1s linear infinite;display:inline-block}"
+       "@keyframes spin{to{transform:rotate(360deg)}}"
        ".hint{font-size:12px;color:var(--mut)}"
        ".pill{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--mut)}"
+       ".head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}"
        ".pill a{display:inline-flex;align-items:center;gap:8px;padding:10px 12px;border-radius:12px;"
        "border:1px solid rgba(169,183,214,.25);background:rgba(169,183,214,.06);color:var(--mut);text-decoration:none;font-weight:700}"
+       ".inline-title{font-size:16px;font-weight:700;color:var(--txt);margin:0}"
        ".section{margin-top:18px}"
        ".ok{color:var(--acc)}.bad{color:var(--bad)}"
        ".check{display:flex;gap:8px;align-items:center;user-select:none}"
@@ -461,8 +471,10 @@ String pageShell(const String& title, const String& body, const String& script =
        "@media(min-width:720px){.grid2{grid-template-columns:1fr 1fr}}"
        "code{background:rgba(169,183,214,.08);padding:2px 6px;border-radius:8px;border:1px solid rgba(169,183,214,.14)}"
        "</style></head><body><div class='wrap'><div class='card'>"
-       "<div class='pill'><a href='/'>ESP32-C6 • Setup</a></div>"
-       + (title.length() ? "<h1>" + htmlEscape(title) + "</h1>" : "")
+       + (titleInline && title.length()
+            ? "<div class='head'><div class='pill'><a href='/'>ESP32-C6 • Setup</a></div><div class='inline-title'>" + htmlEscape(title) + "</div></div>"
+            : "<div class='pill'><a href='/'>ESP32-C6 • Setup</a></div>")
+       + ((!titleInline && title.length()) ? "<h1>" + htmlEscape(title) + "</h1>" : "")
        + body +
        "</div></div>"
        "<script>" + script + "</script>"
@@ -614,7 +626,7 @@ String connectedPage() {
   String body;
   body += "<p><span class='ok'>Connected</span> • IP <b>" + htmlEscape(ip) + "</b> • mDNS <b>" + htmlEscape(host) + ".local</b></p>";
   body += "<div class='btns' style='margin-top:16px'>"
-          "<button id='btnOn' onclick='toggle(1)'>ON</button>"
+          "<button id='btnOn' class='secondary' onclick='toggle(1)'>ON</button>"
           "<button id='btnOff' class='secondary' onclick='toggle(0)'>OFF</button>"
           "<button id='btnBreath' class='secondary' onclick='setBreathing()'>BREATHING</button>"
           "<button id='btnOta' class='secondary' onclick='openOta()'>OTA</button>"
@@ -649,6 +661,12 @@ String connectedPage() {
             "  if(mode==='breathing' && br) br.classList.add('active');"
             "  activeMode = mode;"
             "}"
+            "function fetchWithTimeout(url, opts, ms){"
+            "  const ctrl=new AbortController();"
+            "  const t=setTimeout(()=>ctrl.abort(), ms||1600);"
+            "  const o=Object.assign({}, opts||{}, {signal: ctrl.signal});"
+            "  return fetch(url, o).finally(()=>clearTimeout(t));"
+            "}"
             "function setBusyBtn(id,on){const b=document.getElementById(id); if(b) b.classList.toggle('busy', !!on);}"
             "function setBusy(ms){"
             "  const btns=document.querySelectorAll('button');"
@@ -662,12 +680,12 @@ String connectedPage() {
             "  setBusyBtn(s ? 'btnOn' : 'btnOff', true);"
             "  setBusy(500);"
             "  try{"
-            "    const r=await fetch('/api/set?state='+s);"
+            "    const r=await fetchWithTimeout('/api/set?state='+s, {}, 2000);"
             "    const j=await r.json();"
             "    if(j.ok){setMsg('Output is now '+(j.state?'ON':'OFF'));}"
             "    else{setMsg(j.error||'Failed', true); if(prev) setActiveMode(prev);}"
             "  }catch(e){"
-            "    setMsg('Request failed. Check connection.', true);"
+            "    setMsg('Device busy or rebooting. Try again in a few seconds.', true);"
             "    if(prev) setActiveMode(prev);"
             "  }"
             "  setBusyBtn('btnOn', false);"
@@ -676,11 +694,17 @@ String connectedPage() {
             "function copyToken(){"
             "  const b=document.getElementById('btnCopy');"
             "  if(b){b.classList.add('active'); b.classList.add('busy');}"
+            "  const done=(ok)=>{setMsg(ok?'Token copied':'Copy failed', !ok); if(b){setTimeout(()=>{b.classList.remove('busy'); b.classList.remove('active');},900);}};"
             "  const t=document.getElementById('tok').textContent;"
-            "  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t); setMsg('Token copied'); if(b){setTimeout(()=>{b.classList.remove('busy'); b.classList.remove('active');},800);} return;}"
-            "  const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select();"
-            "  document.execCommand('copy'); document.body.removeChild(ta); setMsg('Token copied');"
-            "  if(b){setTimeout(()=>{b.classList.remove('busy'); b.classList.remove('active');},800);}"
+            "  if(navigator.clipboard&&navigator.clipboard.writeText){"
+            "    navigator.clipboard.writeText(t).then(()=>done(true)).catch(()=>done(false));"
+            "    return;"
+            "  }"
+            "  try{"
+            "    const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select();"
+            "    const ok=document.execCommand('copy'); document.body.removeChild(ta);"
+            "    done(!!ok);"
+            "  }catch(e){done(false);}"
             "}"
             "async function setBreathing(){"
             "  const prev=activeMode;"
@@ -693,12 +717,12 @@ String connectedPage() {
             "  setBusyBtn('btnBreathApply', true);"
             "  setBusy(700);"
             "  try{"
-            "    const r=await fetch(`/api/mode?mode=breathing&period_ms=${p}&min_pct=${mn}&max_pct=${mx}`);"
+            "    const r=await fetchWithTimeout(`/api/mode?mode=breathing&period_ms=${p}&min_pct=${mn}&max_pct=${mx}`, {}, 2000);"
             "    const j=await r.json();"
             "    if(j.ok){setMsg('Breathing enabled');}"
             "    else{setMsg(j.error||'Failed', true); if(prev) setActiveMode(prev);}"
             "  }catch(e){"
-            "    setMsg('Request failed. Check connection.', true);"
+            "    setMsg('Device busy or rebooting. Try again in a few seconds.', true);"
             "    if(prev) setActiveMode(prev);"
             "  }"
             "  setBusyBtn('btnBreath', false);"
@@ -707,12 +731,23 @@ String connectedPage() {
             "function openOta(){const b=document.getElementById('btnOta'); if(b) b.classList.add('active'); setBusyBtn('btnOta', true); setMsg('Opening OTA…'); window.location.href='/update';}"
             "async function initStateFromDevice(){"
             "  try{"
-            "    const r=await fetch('/api/status');"
+            "    const r=await fetchWithTimeout('/api/status', {}, 1600);"
             "    const j=await r.json();"
-            "    if(j&&j.ok&&j.output_mode){setActiveMode(j.output_mode);}"
+            "    if(j&&j.ok&&j.output_mode){setActiveMode(j.output_mode); setMsg(''); return true;}"
             "  }catch(e){}"
+            "  setMsg('Device busy or rebooting. Try again in a few seconds.', true);"
+            "  return false;"
             "}"
-            "document.addEventListener('DOMContentLoaded',()=>{initStateFromDevice();});";
+            "document.addEventListener('DOMContentLoaded',()=>{"
+            "  setMsg('Connecting to device…');"
+            "  let tries=0;"
+            "  const tick=async()=>{"
+            "    tries++;"
+            "    const ok=await initStateFromDevice();"
+            "    if(!ok && tries<6){setTimeout(tick, 2000);} else if(ok){setMsg('');}"
+            "  };"
+            "  tick();"
+            "});";
   return pageShell("", body, script);
 }
 
@@ -1208,18 +1243,50 @@ void setupHttpHandlers() {
     }
     String body;
     body += "<p>Upload a compiled <b>.bin</b> to update firmware.</p>";
-    body += "<form method='POST' action='/update' enctype='multipart/form-data'>"
+    body += "<div id='otaForm'>"
+            "<form method='POST' action='/update' enctype='multipart/form-data' target='ota_iframe'>"
             "<input type='file' name='firmware' accept='.bin' required/>"
             "<div class='btns'><button id='btnUpload' type='submit'>Upload & Update</button></div>"
             "</form>"
+            "</div>"
+            "<div id='otaWait' style='display:none'>"
+            "<p style='display:flex;align-items:center;gap:8px'><span class='spinner'></span>Update in progress…</p>"
+            "<p class='hint'>Your device will reboot, then we will reconnect.</p>"
+            "<p class='hint' id='recon'>Waiting for device…</p>"
+            "</div>"
+            "<iframe name='ota_iframe' style='display:none'></iframe>"
             "<p class='hint'>After upload completes, the device will reboot.</p>";
     String script;
     script += "document.addEventListener('DOMContentLoaded',()=>{"
               "  const b=document.getElementById('btnUpload');"
-              "  const f=document.querySelector('form');"
-              "  if(b&&f){f.addEventListener('submit',()=>{b.classList.add('active'); b.classList.add('busy');});}"
+              "  const f=document.querySelector('#otaForm form');"
+              "  const wait=document.getElementById('otaWait');"
+              "  const recon=document.getElementById('recon');"
+              "  if(b&&f){f.addEventListener('submit',()=>{"
+              "    b.classList.add('active'); b.classList.add('busy');"
+              "    const formWrap=document.getElementById('otaForm');"
+              "    if(formWrap) formWrap.style.display='none';"
+              "    if(wait) wait.style.display='block';"
+              "    let tries=0;"
+              "    const ping=async()=>{"
+              "      tries++;"
+              "      if(recon) recon.textContent='Waiting for device… ('+tries+')';"
+              "      try{"
+              "        const r=await fetch('/',{cache:'no-store'});"
+              "        if(r&&r.ok){location.href='/'; return;}"
+              "      }catch(e){}"
+              "      setTimeout(ping, 2000);"
+              "    };"
+              "    setTimeout(ping, 3000);"
+              "  });}"
               "});";
-    request->send(200, "text/html", pageShell("OTA Update", body, script));
+    AsyncWebServerResponse *resp = request->beginResponse(
+      200, "text/html", pageShell("OTA Update", body, script, true)
+    );
+    resp->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    resp->addHeader("Pragma", "no-cache");
+    resp->addHeader("Expires", "0");
+    request->send(resp);
   });
 
   server.on(
@@ -1244,31 +1311,50 @@ void setupHttpHandlers() {
           ok ? "{\"ok\":true,\"rebooting\":true}" : "{\"ok\":false,\"error\":\"Update failed\"}"
         );
         resp->addHeader("Connection", "close");
+        resp->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
         request->send(resp);
       } else {
         String body;
         if (ok) {
           body += "<p>Update complete. Rebooting…</p>";
-          body += "<p class='hint'>You will be redirected to the main page.</p>";
-          body += "<div class='btns'><button onclick=\"location.href='/'\">Go to Home</button></div>";
-          body += "<script>setTimeout(()=>{location.href='/'},8000);</script>";
+          body += "<p class='hint'>Reconnecting to the device. This can take a few seconds.</p>";
+          body += "<div class='btns'><button class='secondary' onclick=\"location.href='/'\">Go to Home</button></div>";
+          body += "<p class='hint' id='recon'>Waiting for device…</p>";
+          body += "<script>"
+                  "let tries=0;"
+                  "async function ping(){"
+                  "  tries++;"
+                  "  document.getElementById('recon').textContent='Waiting for device… ('+tries+')';"
+                  "  try{"
+                  "    const r=await fetch('/',{cache:'no-store'});"
+                  "    if(r&&r.ok){location.href='/'; return;}"
+                  "  }catch(e){}"
+                  "  setTimeout(ping, 1500);"
+                  "}"
+                  "setTimeout(ping, 1500);"
+                  "</script>";
         } else {
           body += "<p class='bad'>Update failed.</p>";
           body += "<div class='btns'><button onclick=\"location.href='/update'\">Try Again</button></div>";
         }
         AsyncWebServerResponse *resp = request->beginResponse(
-          200, "text/html", pageShell("OTA Update", body, "")
+          200, "text/html", pageShell("OTA Update", body, "", true)
         );
         resp->addHeader("Connection", "close");
+        resp->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
         request->send(resp);
       }
-      delay(250);
-      ESP.restart();
+      if (ok || otaUpdateOk) {
+        rebootPending = true;
+        rebootAtMs = millis() + 4000;
+        otaUpdateOk = false;
+      }
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
       if (!ensureApiAuth(request)) return;
       if (index == 0) {
         Serial.printf("OTA start: %s\n", filename.c_str());
+        otaUpdateOk = false;
         if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
           Update.printError(Serial);
         }
@@ -1281,8 +1367,10 @@ void setupHttpHandlers() {
       if (final) {
         if (!Update.end(true)) {
           Update.printError(Serial);
+          otaUpdateOk = false;
         } else {
           Serial.printf("OTA done: %u bytes\n", (unsigned)(index + len));
+          otaUpdateOk = true;
         }
       }
     }
@@ -1368,5 +1456,11 @@ void loop() {
 
   // Runtime factory reset long-press
   handleResetLongPress();
+
+  if (rebootPending && (millis() - rebootAtMs) < 0x80000000UL) {
+    if (millis() >= rebootAtMs) {
+      ESP.restart();
+    }
+  }
   delay(5);
 }
