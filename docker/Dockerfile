@@ -10,7 +10,7 @@ RUN apt-get update \
 
 RUN mkdir -p /opt/arduino/user
 
-ARG ARDUINO_CLI_VERSION=1.4.0
+ARG ARDUINO_CLI_VERSION=v1.4.0
 RUN set -eux; \
   ARCH="$(dpkg --print-architecture)"; \
   case "$ARCH" in \
