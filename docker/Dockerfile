@@ -31,6 +31,6 @@ RUN arduino-cli config init --overwrite \
   && arduino-cli config set board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json \
   && arduino-cli core update-index \
   && arduino-cli core install esp32:esp32 \
-  && arduino-cli lib install "ESP Async WebServer@3.9.4" "AsyncTCP@3.4.10" "ArduinoJson@7.4.2"
+  && arduino-cli lib install "ESP Async WebServer@3.9.4" "Async TCP@3.4.10" "ArduinoJson@7.4.2"
 
 WORKDIR /workspace
