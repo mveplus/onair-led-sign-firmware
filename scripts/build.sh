@@ -27,7 +27,7 @@ for fqbn in "${fqbn_list[@]}"; do
   echo "Building for $fqbn_trimmed"
   arduino-cli compile \
     --fqbn "$fqbn_trimmed" \
-    --build-property "compiler.cpp.extra_flags=-DFW_VERSION=\\\"${FW_VERSION}\\\"" \
+    --build-property "compiler.cpp.extra_flags=-DFW_VERSION=\"${FW_VERSION}\"" \
     --export-binaries \
     --output-dir "$OUT_DIR" \
     "$SKETCH_DIR"
