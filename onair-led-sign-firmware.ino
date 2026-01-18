@@ -440,7 +440,15 @@ String pageShell(const String& title, const String& body, const String& script =
        "button{padding:10px 12px;border-radius:12px;border:1px solid rgba(94,234,212,.35);"
        "background:linear-gradient(180deg, rgba(94,234,212,.18), rgba(94,234,212,.06));"
        "color:var(--txt);cursor:pointer;font-weight:700;font-size:13px}"
+       "button:disabled{opacity:.55;cursor:not-allowed}"
+       "button.active:disabled{opacity:1}"
        "button.secondary{border-color:rgba(169,183,214,.25);background:rgba(169,183,214,.06);color:var(--mut)}"
+       "button.active{border-color:rgba(94,234,212,.75);background:linear-gradient(180deg, rgba(94,234,212,.45), rgba(94,234,212,.12));"
+       "color:var(--txt);box-shadow:0 0 0 3px rgba(94,234,212,.12) inset}"
+       "@keyframes pulse{0%{transform:translateY(0);box-shadow:0 0 0 0 rgba(94,234,212,.25)}"
+       "50%{transform:translateY(-1px);box-shadow:0 0 0 6px rgba(94,234,212,.08)}"
+       "100%{transform:translateY(0);box-shadow:0 0 0 0 rgba(94,234,212,.25)}}"
+       "button.busy{animation:pulse .8s ease-in-out infinite}"
        ".hint{font-size:12px;color:var(--mut)}"
        ".pill{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--mut)}"
        ".pill a{display:inline-flex;align-items:center;gap:8px;padding:10px 12px;border-radius:12px;"
@@ -528,7 +536,7 @@ String setupPage() {
   body += "</details>";
 
   body += "<div class='btns'>"
-          "<button onclick='saveCfg()'>Save & Connect</button>"
+          "<button id='btnSave' onclick='saveCfg()'>Save & Connect</button>"
           "</div>";
 
   body += "<p class='hint' id='msg'></p>";
@@ -567,7 +575,9 @@ String setupPage() {
             "  setMsg('Scan taking longer than expected. Try again.', true);"
             "}"
             "function toggleManual(){const sel=document.getElementById('ssidSel'); const wrap=document.getElementById('manualWrap'); if(!sel||!wrap) return; wrap.style.display=(sel.value==='__manual__')?'block':'none';}"
+            "function setActiveBtn(id){const b=document.getElementById(id); if(!b) return; b.classList.add('active');}"
             "async function saveCfg(){"
+            "  setActiveBtn('btnSave');"
             "  const ssSel=document.getElementById('ssidSel').value.trim();"
             "  const ssMan=document.getElementById('ssid').value.trim();"
             "  const ssid=(ssSel==='__manual__'||!ssSel.length)?ssMan:ssSel;"
@@ -604,10 +614,10 @@ String connectedPage() {
   String body;
   body += "<p><span class='ok'>Connected</span> • IP <b>" + htmlEscape(ip) + "</b> • mDNS <b>" + htmlEscape(host) + ".local</b></p>";
   body += "<div class='btns' style='margin-top:16px'>"
-          "<button onclick='toggle(1)'>ON</button>"
-          "<button class='secondary' onclick='toggle(0)'>OFF</button>"
-          "<button class='secondary' onclick='setBreathing()'>BREATHING</button>"
-          "<button class='secondary' onclick='openOta()'>OTA</button>"
+          "<button id='btnOn' onclick='toggle(1)'>ON</button>"
+          "<button id='btnOff' class='secondary' onclick='toggle(0)'>OFF</button>"
+          "<button id='btnBreath' class='secondary' onclick='setBreathing()'>BREATHING</button>"
+          "<button id='btnOta' class='secondary' onclick='openOta()'>OTA</button>"
           "</div>";
   body += "<details class='section'><summary class='hint'>Breathing settings</summary>";
   body += "<div class='grid2'>";
@@ -615,7 +625,7 @@ String connectedPage() {
   body += "<div><label>Breathing min (%)</label><input id='br_min' type='number' min='1' max='99' value='" + String(breathMinPct) + "'/></div>";
   body += "<div><label>Breathing max (%)</label><input id='br_max' type='number' min='1' max='100' value='" + String(breathMaxPct) + "'/></div>";
   body += "</div>";
-  body += "<div class='btns'><button class='secondary' onclick='setBreathing()'>Apply breathing settings</button></div>";
+  body += "<div class='btns'><button id='btnBreathApply' class='secondary' onclick='setBreathing()'>Apply breathing settings</button></div>";
   body += "</details>";
   body += "<details class='section'><summary class='hint'>API access</summary>";
   body += "<p>API: <code>/api/status</code>, <code>/api/set?state=1</code>, <code>/api/config</code> • OTA: <code>/update</code></p>";
@@ -625,22 +635,43 @@ String connectedPage() {
   body += "<p class='hint' id='msg'></p>";
 
   String script;
-  script += "function setMsg(t,bad){const el=document.getElementById('msg'); if(!el) return; el.textContent=t; el.className='hint '+(bad?'bad':'');}"
+  script += "let activeMode=null;"
+            "function setMsg(t,bad){const el=document.getElementById('msg'); if(!el) return; el.textContent=t; el.className='hint '+(bad?'bad':'');}"
+            "function setActiveMode(mode){"
+            "  const on=document.getElementById('btnOn');"
+            "  const off=document.getElementById('btnOff');"
+            "  const br=document.getElementById('btnBreath');"
+            "  if(on) on.classList.remove('active');"
+            "  if(off) off.classList.remove('active');"
+            "  if(br) br.classList.remove('active');"
+            "  if(mode==='on' && on) on.classList.add('active');"
+            "  if(mode==='off' && off) off.classList.add('active');"
+            "  if(mode==='breathing' && br) br.classList.add('active');"
+            "  activeMode = mode;"
+            "}"
+            "function setBusyBtn(id,on){const b=document.getElementById(id); if(b) b.classList.toggle('busy', !!on);}"
             "function setBusy(ms){"
             "  const btns=document.querySelectorAll('button');"
             "  btns.forEach(b=>{b.disabled=true;});"
             "  setTimeout(()=>{btns.forEach(b=>{b.disabled=false;});}, ms||600);"
             "}"
             "async function toggle(s){"
+            "  const prev=activeMode;"
+            "  setActiveMode(s ? 'on' : 'off');"
             "  setMsg(s? 'Turning ON…':'Turning OFF…');"
+            "  setBusyBtn(s ? 'btnOn' : 'btnOff', true);"
             "  setBusy(500);"
             "  try{"
             "    const r=await fetch('/api/set?state='+s);"
             "    const j=await r.json();"
-            "    setMsg(j.ok?('Output is now '+(j.state?'ON':'OFF')):(j.error||'Failed'), !j.ok);"
+            "    if(j.ok){setMsg('Output is now '+(j.state?'ON':'OFF'));}"
+            "    else{setMsg(j.error||'Failed', true); if(prev) setActiveMode(prev);}"
             "  }catch(e){"
             "    setMsg('Request failed. Check connection.', true);"
+            "    if(prev) setActiveMode(prev);"
             "  }"
+            "  setBusyBtn('btnOn', false);"
+            "  setBusyBtn('btnOff', false);"
             "}"
             "function copyToken(){"
             "  const t=document.getElementById('tok').textContent;"
@@ -649,20 +680,36 @@ String connectedPage() {
             "  document.execCommand('copy'); document.body.removeChild(ta); setMsg('Token copied');"
             "}"
             "async function setBreathing(){"
+            "  const prev=activeMode;"
+            "  setActiveMode('breathing');"
             "  const p=parseInt(document.getElementById('br_period').value||'3000',10);"
             "  const mn=parseInt(document.getElementById('br_min').value||'5',10);"
             "  const mx=parseInt(document.getElementById('br_max').value||'100',10);"
             "  setMsg('Applying breathing…');"
+            "  setBusyBtn('btnBreath', true);"
+            "  setBusyBtn('btnBreathApply', true);"
             "  setBusy(700);"
             "  try{"
             "    const r=await fetch(`/api/mode?mode=breathing&period_ms=${p}&min_pct=${mn}&max_pct=${mx}`);"
             "    const j=await r.json();"
-            "    setMsg(j.ok?'Breathing enabled':(j.error||'Failed'), !j.ok);"
+            "    if(j.ok){setMsg('Breathing enabled');}"
+            "    else{setMsg(j.error||'Failed', true); if(prev) setActiveMode(prev);}"
             "  }catch(e){"
             "    setMsg('Request failed. Check connection.', true);"
+            "    if(prev) setActiveMode(prev);"
             "  }"
+            "  setBusyBtn('btnBreath', false);"
+            "  setBusyBtn('btnBreathApply', false);"
             "}"
-            "function openOta(){setMsg('Opening OTA…'); window.location.href='/update';}";
+            "function openOta(){const b=document.getElementById('btnOta'); if(b) b.classList.add('active'); setBusyBtn('btnOta', true); setMsg('Opening OTA…'); window.location.href='/update';}"
+            "async function initStateFromDevice(){"
+            "  try{"
+            "    const r=await fetch('/api/status');"
+            "    const j=await r.json();"
+            "    if(j&&j.ok&&j.output_mode){setActiveMode(j.output_mode);}"
+            "  }catch(e){}"
+            "}"
+            "document.addEventListener('DOMContentLoaded',()=>{initStateFromDevice();});";
   return pageShell("", body, script);
 }
 
@@ -1157,12 +1204,40 @@ void setupHttpHandlers() {
     }
     String body;
     body += "<p>Upload a compiled <b>.bin</b> to update firmware.</p>";
+    body += "<div class='section'>"
+            "<div class='hint'>Current mode</div>"
+            "<div class='btns'>"
+            "<button id='btnModeOn' class='secondary' disabled>ON</button>"
+            "<button id='btnModeOff' class='secondary' disabled>OFF</button>"
+            "<button id='btnModeBreath' class='secondary' disabled>BREATHING</button>"
+            "</div>"
+            "</div>";
     body += "<form method='POST' action='/update' enctype='multipart/form-data'>"
             "<input type='file' name='firmware' accept='.bin' required/>"
-            "<div class='btns'><button type='submit'>Upload & Update</button></div>"
+            "<div class='btns'><button id='btnUpload' type='submit'>Upload & Update</button></div>"
             "</form>"
             "<p class='hint'>After upload completes, the device will reboot.</p>";
-    request->send(200, "text/html", pageShell("OTA Update", body, ""));
+    String script;
+    script += "document.addEventListener('DOMContentLoaded',()=>{"
+              "  const b=document.getElementById('btnUpload');"
+              "  const f=document.querySelector('form');"
+              "  if(b&&f){f.addEventListener('submit',()=>{b.classList.add('active'); b.classList.add('busy');});}"
+              "  const setMode=(m)=>{"
+              "    const on=document.getElementById('btnModeOn');"
+              "    const off=document.getElementById('btnModeOff');"
+              "    const br=document.getElementById('btnModeBreath');"
+              "    if(on) on.classList.remove('active');"
+              "    if(off) off.classList.remove('active');"
+              "    if(br) br.classList.remove('active');"
+              "    if(m==='on'&&on) on.classList.add('active');"
+              "    if(m==='off'&&off) off.classList.add('active');"
+              "    if(m==='breathing'&&br) br.classList.add('active');"
+              "  };"
+              "  fetch('/api/status').then(r=>r.json()).then(j=>{"
+              "    if(j&&j.ok&&j.output_mode){setMode(j.output_mode);}"
+              "  }).catch(()=>{});"
+              "});";
+    request->send(200, "text/html", pageShell("OTA Update", body, script));
   });
 
   server.on(
