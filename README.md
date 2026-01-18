@@ -185,6 +185,20 @@ curl -H "X-API-Token: <token>" http://<ip>/api/config
    - ArduinoJson v6.x (Arduino IDE built‑in via Library Manager)
 4. Compile and upload.
 
+## Docker Build (arduino-cli)
+
+Build binaries locally in Docker and write outputs to `build/` with SHA1 signatures.
+
+```bash
+./scripts/docker-build.sh
+```
+
+Override the board if needed:
+
+```bash
+FQBN=esp32:esp32:xiao_esp32c6 ./scripts/docker-build.sh
+```
+
 ## Optional BLE Provisioning
 
 BLE provisioning is compile‑time gated:
