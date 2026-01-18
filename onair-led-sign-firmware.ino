@@ -10,7 +10,7 @@ WHAT THIS DOES
 - HTTP API to read status and toggle an output GPIO.
 - OTA firmware upload via /update.
 - mDNS advertising using the configured hostname.
-- Factory reset via BOOT long-press.
+- Factory reset via BOOT long-press for 5s.
 
 DEFAULTS / BEHAVIOR
 -------------------
@@ -21,9 +21,9 @@ DEFAULTS / BEHAVIOR
 
 REQUIRED LIBRARIES (as you installed)
 ------------------------------------
-- ESPAsyncWebServer v3.9.4 https://github.com/ESP32Async/ESPAsyncWebServer/releases/tag/v3.9.4
-- AsyncTCP v3.4.10  - Adruino IDE built-in installed via libraries manager
-- ArduinoJson v6.x  - Adruino IDE built-in installed via libraries manager
+- ESPAsyncWebServer v3.9.4 by ESP32Async https://github.com/ESP32Async/ESPAsyncWebServer/releases/tag/v3.9.4
+- Async TCP v3.4.10 by ESP32Async - Adruino IDE built-in installed via libraries manager
+- ArduinoJson v7.4.2 by Benoit Blanchon - Adruino IDE built-in installed via libraries manager
 
 ================================================================================
 */
