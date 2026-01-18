@@ -1,5 +1,7 @@
 static const char* BOARD_NAME = "XIAO-ESP32-C6";
-static const char* FW_VERSION = "2026-01-18";
+#ifndef FW_VERSION
+#define FW_VERSION "dev"
+#endif
 /*
 ================================================================================
  ESP32-C6 Setup Portal + API + OTA + Factory Reset
