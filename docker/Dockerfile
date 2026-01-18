@@ -15,8 +15,10 @@ RUN set -eux; \
   ARCH="$(dpkg --print-architecture)"; \
   case "$ARCH" in \
     amd64) ARDUINO_ARCH="Linux_64bit" ;; \
+    i386) ARDUINO_ARCH="Linux_32bit" ;; \
     arm64) ARDUINO_ARCH="Linux_ARM64" ;; \
     armhf) ARDUINO_ARCH="Linux_ARMv7" ;; \
+    armel) ARDUINO_ARCH="Linux_ARMv6" ;; \
     *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; \
   esac; \
   ARDUINO_VER="${ARDUINO_CLI_VERSION#v}"; \
