@@ -1,4 +1,4 @@
-3197f412ce4e061e2d6a4078e42e33c922bdac41  onair-led-sign-firmware.ino.bin
+ca087d8bb4d9ac3230ac413ba06409942537163a  onair-led-sign-firmware.ino.bin
 02650c6e5bbf8cd370c7d272afd0b2b8f2b05f72  onair-led-sign-firmware.ino.bootloader.bin
-4fc3946580f72187f723166802a24455df61d4b1  onair-led-sign-firmware.ino.merged.bin
+f0f09e9b0cd85d30922ac2e30e40ebb2da2f8614  onair-led-sign-firmware.ino.merged.bin
 6d91ae084b5d9737201ccdc153daacf270f2ba73  onair-led-sign-firmware.ino.partitions.bin

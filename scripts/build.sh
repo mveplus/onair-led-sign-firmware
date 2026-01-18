@@ -15,6 +15,11 @@ SKETCH_DIR="$OUT_DIR/$SKETCH_NAME"
 mkdir -p "$SKETCH_DIR"
 cp -f "$SKETCH" "$SKETCH_DIR/$SKETCH_BASENAME"
 
+GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
+[ -z "$GIT_SHA" ] && GIT_SHA="nogit"
+BUILD_DATE="$(date -u +%Y-%m-%d)"
+FW_VERSION="${BUILD_DATE}+${GIT_SHA}"
+
 IFS=',' read -r -a fqbn_list <<< "$FQBN"
 for fqbn in "${fqbn_list[@]}"; do
   fqbn_trimmed="$(echo "$fqbn" | xargs)"
@@ -22,6 +27,7 @@ for fqbn in "${fqbn_list[@]}"; do
   echo "Building for $fqbn_trimmed"
   arduino-cli compile \
     --fqbn "$fqbn_trimmed" \
+    --build-property "compiler.cpp.extra_flags=-DFW_VERSION=\\\"${FW_VERSION}\\\"" \
     --export-binaries \
     --output-dir "$OUT_DIR" \
     "$SKETCH_DIR"

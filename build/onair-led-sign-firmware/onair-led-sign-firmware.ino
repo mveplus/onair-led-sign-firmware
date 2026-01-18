@@ -1,4 +1,5 @@
 static const char* BOARD_NAME = "XIAO-ESP32-C6";
+static const char* FW_VERSION = "2026-01-18";
 /*
 ================================================================================
  ESP32-C6 Setup Portal + API + OTA + Factory Reset
@@ -125,9 +126,6 @@ static uint32_t lastScanStartedMs = 0;
 static const uint32_t SCAN_MAX_WAIT_MS = 6000;
 
 // ---------------- Delayed reboot ----------------
-static bool rebootPending = false;
-static uint32_t rebootAtMs = 0;
-static bool otaUpdateOk = false;
 
 // ---------------- Helpers ----------------
 
@@ -625,6 +623,7 @@ String connectedPage() {
 
   String body;
   body += "<p><span class='ok'>Connected</span> • IP <b>" + htmlEscape(ip) + "</b> • mDNS <b>" + htmlEscape(host) + ".local</b></p>";
+  body += "<p class='hint'>FW: <code>" + htmlEscape(FW_VERSION) + "</code></p>";
   body += "<div class='btns' style='margin-top:16px'>"
           "<button id='btnOn' class='secondary' onclick='toggle(1)'>ON</button>"
           "<button id='btnOff' class='secondary' onclick='toggle(0)'>OFF</button>"
@@ -640,7 +639,7 @@ String connectedPage() {
   body += "<div class='btns'><button id='btnBreathApply' class='secondary' onclick='setBreathing()'>Apply breathing settings</button></div>";
   body += "</details>";
   body += "<details class='section'><summary class='hint'>API access</summary>";
-  body += "<p>API: <code>/api/status</code>, <code>/api/set?state=1</code>, <code>/api/config</code> • OTA: <code>/update</code></p>";
+  body += "<p>API: <code>/api/status</code>, <code>/api/set?state=1</code>, <code>/api/config</code>, <code>/api/reboot</code> • OTA: <code>/update</code></p>";
   body += "<p>Breathing: <code>/api/mode?mode=breathing&period_ms=3000&min_pct=5&max_pct=100</code></p>";
   body += "<p>API token: <code id='tok'>" + htmlEscape(token) + "</code> <button id='btnCopy' class='secondary' onclick='copyToken()'>Copy</button></p>";
   body += "</details>";
@@ -758,6 +757,12 @@ void doFactoryReset() {
   ledWrite(true);
   clearConfig();
   delay(300);
+  ESP.restart();
+}
+
+void scheduleReboot(uint32_t delayMs = 200) {
+  Serial.println("Reboot requested.");
+  delay(delayMs);
   ESP.restart();
 }
 
@@ -1109,6 +1114,7 @@ void setupHttpHandlers() {
     doc["ip"] = portalMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
     doc["ssid"] = portalMode ? apSsid : WiFi.SSID();
     doc["hostname"] = loadString("host", defaultHostName().c_str());
+    doc["fw_version"] = FW_VERSION;
     doc["out_pin"] = loadInt("out", 6);
     doc["led_active_high"] = loadBool("ledah", true);
     doc["output_mode"] = outputMode == MODE_BREATHING ? "breathing" : (outputMode == MODE_ON ? "on" : "off");
@@ -1234,6 +1240,13 @@ void setupHttpHandlers() {
     request->send(200, "application/json", out);
   });
 
+  server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!ensureApiAuth(request)) return;
+    request->send(200, "application/json", "{\"ok\":true,\"rebooting\":true}");
+    delay(200);
+    ESP.restart();
+  });
+
   // -------- OTA (/update) --------
   server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
     if (!ensureApiAuth(request)) return;
@@ -1243,42 +1256,16 @@ void setupHttpHandlers() {
     }
     String body;
     body += "<p>Upload a compiled <b>.bin</b> to update firmware.</p>";
-    body += "<div id='otaForm'>"
-            "<form method='POST' action='/update' enctype='multipart/form-data' target='ota_iframe'>"
+    body += "<form method='POST' action='/update' enctype='multipart/form-data'>"
             "<input type='file' name='firmware' accept='.bin' required/>"
             "<div class='btns'><button id='btnUpload' type='submit'>Upload & Update</button></div>"
             "</form>"
-            "</div>"
-            "<div id='otaWait' style='display:none'>"
-            "<p style='display:flex;align-items:center;gap:8px'><span class='spinner'></span>Update in progress…</p>"
-            "<p class='hint'>Your device will reboot, then we will reconnect.</p>"
-            "<p class='hint' id='recon'>Waiting for device…</p>"
-            "</div>"
-            "<iframe name='ota_iframe' style='display:none'></iframe>"
             "<p class='hint'>After upload completes, the device will reboot.</p>";
     String script;
     script += "document.addEventListener('DOMContentLoaded',()=>{"
               "  const b=document.getElementById('btnUpload');"
-              "  const f=document.querySelector('#otaForm form');"
-              "  const wait=document.getElementById('otaWait');"
-              "  const recon=document.getElementById('recon');"
-              "  if(b&&f){f.addEventListener('submit',()=>{"
-              "    b.classList.add('active'); b.classList.add('busy');"
-              "    const formWrap=document.getElementById('otaForm');"
-              "    if(formWrap) formWrap.style.display='none';"
-              "    if(wait) wait.style.display='block';"
-              "    let tries=0;"
-              "    const ping=async()=>{"
-              "      tries++;"
-              "      if(recon) recon.textContent='Waiting for device… ('+tries+')';"
-              "      try{"
-              "        const r=await fetch('/',{cache:'no-store'});"
-              "        if(r&&r.ok){location.href='/'; return;}"
-              "      }catch(e){}"
-              "      setTimeout(ping, 2000);"
-              "    };"
-              "    setTimeout(ping, 3000);"
-              "  });}"
+              "  const f=document.querySelector('form');"
+              "  if(b&&f){f.addEventListener('submit',()=>{b.classList.add('active'); b.classList.add('busy');});}"
               "});";
     AsyncWebServerResponse *resp = request->beginResponse(
       200, "text/html", pageShell("OTA Update", body, script, true)
@@ -1317,22 +1304,9 @@ void setupHttpHandlers() {
         String body;
         if (ok) {
           body += "<p>Update complete. Rebooting…</p>";
-          body += "<p class='hint'>Reconnecting to the device. This can take a few seconds.</p>";
-          body += "<div class='btns'><button class='secondary' onclick=\"location.href='/'\">Go to Home</button></div>";
-          body += "<p class='hint' id='recon'>Waiting for device…</p>";
-          body += "<script>"
-                  "let tries=0;"
-                  "async function ping(){"
-                  "  tries++;"
-                  "  document.getElementById('recon').textContent='Waiting for device… ('+tries+')';"
-                  "  try{"
-                  "    const r=await fetch('/',{cache:'no-store'});"
-                  "    if(r&&r.ok){location.href='/'; return;}"
-                  "  }catch(e){}"
-                  "  setTimeout(ping, 1500);"
-                  "}"
-                  "setTimeout(ping, 1500);"
-                  "</script>";
+          body += "<p class='hint'>You will be redirected to the main page.</p>";
+          body += "<div class='btns'><button onclick=\"location.href='/'\">Go to Home</button></div>";
+          body += "<script>setTimeout(()=>{location.href='/'},8000);</script>";
         } else {
           body += "<p class='bad'>Update failed.</p>";
           body += "<div class='btns'><button onclick=\"location.href='/update'\">Try Again</button></div>";
@@ -1344,17 +1318,13 @@ void setupHttpHandlers() {
         resp->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
         request->send(resp);
       }
-      if (ok || otaUpdateOk) {
-        rebootPending = true;
-        rebootAtMs = millis() + 4000;
-        otaUpdateOk = false;
-      }
+      delay(1200);
+      ESP.restart();
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
       if (!ensureApiAuth(request)) return;
       if (index == 0) {
         Serial.printf("OTA start: %s\n", filename.c_str());
-        otaUpdateOk = false;
         if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
           Update.printError(Serial);
         }
@@ -1367,10 +1337,8 @@ void setupHttpHandlers() {
       if (final) {
         if (!Update.end(true)) {
           Update.printError(Serial);
-          otaUpdateOk = false;
         } else {
           Serial.printf("OTA done: %u bytes\n", (unsigned)(index + len));
-          otaUpdateOk = true;
         }
       }
     }
@@ -1457,10 +1425,5 @@ void loop() {
   // Runtime factory reset long-press
   handleResetLongPress();
 
-  if (rebootPending && (millis() - rebootAtMs) < 0x80000000UL) {
-    if (millis() >= rebootAtMs) {
-      ESP.restart();
-    }
-  }
   delay(5);
 }
