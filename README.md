@@ -33,11 +33,10 @@ Low-side switch using an N-channel MOSFET. The LED sign and ESP32‑C6 board sha
 ```
 USB-C 5V
   +5V --------------------+---------------------+
-                          |                     |
-                      LED SIGN (+)          ESP32-C6 5V
-                          |                     |
-LED SIGN (-) -------> DRAIN  FGP30N06L          |
-                     SOURCE --------------------+---- GND (common)
+          |                                     |
+LED SIGN (+)                                 ESP32-C6 5V      
+                                                |
+LED SIGN (-) ----> DRAIN (FGP30N06L) SOURCE <---+---- GND (common)
 
 ESP32-C6 GPIO (Output pin, default GPIO6)
   |
@@ -50,7 +49,7 @@ ESP32-C6 GPIO (Output pin, default GPIO6)
 
 Notes:
 
-- The ESP32‑C6 is 3.3V logic. Verify the FGP30N06L fully enhances at 3.3V gate drive; if not, use a logic‑level MOSFET or a gate driver.
+- The ESP32‑C6 is 3.3V logic. FGP30N06L is suitable and enhances at 3.3V gate drive; it is a logic‑level N-Channel MOSFET.
 - The gate pulldown (10k) keeps the MOSFET off during boot/reset.
 - Use a small series gate resistor (100–220 ohm) to reduce ringing.
 - If your LED sign is inductive, add a flyback diode across the load (anode to MOSFET drain, cathode to +5V).
@@ -82,6 +81,15 @@ When connected to Wi‑Fi (STA):
 
 - Root page shows status, toggle controls, breathing settings, and OTA entry.
 - mDNS is advertised as `http://<hostname>.local/`.
+
+## First Login & Token Generation
+
+1. After the first successful STA connection, open the device UI:
+   - `http://<device-ip>/` or `http://<hostname>.local/`
+2. When prompted, log in with Basic Auth:
+   - Default: `admin` / `esp32c6` (change in setup portal → Advanced).
+3. The API token is generated automatically on that first STA connection.
+4. You can view/copy the token on the connected UI page under **API access**.
 
 ## Output Control
 
@@ -118,6 +126,12 @@ Token behavior:
 - Generated after the first successful STA connection.
 - Stored in Preferences and displayed on the connected UI page.
 
+Default credentials:
+
+- Username: `admin`
+- Password: `esp32c6`
+- Change these in the setup portal under **Advanced** (Admin user/password fields).
+
 ## API
 
 See `API.md` for full details.
@@ -128,6 +142,27 @@ Quick endpoints:
 - `GET /api/set?state=0|1`
 - `GET /api/mode?mode=off|on|breathing[&period_ms=...&min_pct=...&max_pct=...]`
 - `GET /api/config`
+
+### Example `curl` Commands
+
+Replace `<ip>` with the device IP and `<token>` with your API token.
+
+```bash
+# Status
+curl -H "X-API-Token: <token>" http://<ip>/api/status
+
+# Turn output ON
+curl -H "X-API-Token: <token>" "http://<ip>/api/set?state=1"
+
+# Turn output OFF
+curl -H "X-API-Token: <token>" "http://<ip>/api/set?state=0"
+
+# Set breathing mode (3s, 5% -> 100%)
+curl -H "X-API-Token: <token>" "http://<ip>/api/mode?mode=breathing&period_ms=3000&min_pct=5&max_pct=100"
+
+# Read stored config
+curl -H "X-API-Token: <token>" http://<ip>/api/config
+```
 
 ## OTA Updates
 
