@@ -15,9 +15,9 @@ SKETCH_DIR="$OUT_DIR/$SKETCH_NAME"
 mkdir -p "$SKETCH_DIR"
 cp -f "$SKETCH" "$SKETCH_DIR/$SKETCH_BASENAME"
 
-GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
+GIT_SHA="${GIT_SHA:-$(git rev-parse --short HEAD 2>/dev/null || true)}"
 [ -z "$GIT_SHA" ] && GIT_SHA="nogit"
-BUILD_DATE="$(date -u +%Y-%m-%d)"
+BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%d)}"
 FW_VERSION="${BUILD_DATE}+${GIT_SHA}"
 
 IFS=',' read -r -a fqbn_list <<< "$FQBN"
