@@ -193,10 +193,10 @@ Build binaries locally in Docker and write outputs to `build/` with SHA1 signatu
 ./scripts/docker-build.sh
 ```
 
-Override the board if needed:
+Override the board(s) if needed (comma-separated FQBNs):
 
 ```bash
-FQBN=esp32:esp32:xiao_esp32c6 ./scripts/docker-build.sh
+FQBN=esp32:esp32:dfrobot_beetle_esp32c6,esp32:esp32:XIAO_ESP32C6 ./scripts/docker-build.sh
 ```
 
 ## Optional BLE Provisioning

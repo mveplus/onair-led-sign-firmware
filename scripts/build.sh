@@ -2,16 +2,29 @@
 set -euo pipefail
 
 SKETCH=${SKETCH:-onair-led-sign-firmware.ino}
-FQBN=${FQBN:-esp32:esp32:xiao_esp32c6}
+FQBN=${FQBN:-esp32:esp32:dfrobot_beetle_esp32c6,esp32:esp32:XIAO_ESP32C6}
 OUT_DIR=${OUT_DIR:-build}
 
 mkdir -p "$OUT_DIR"
 
-arduino-cli compile \
-  --fqbn "$FQBN" \
-  --export-binaries \
-  --output-dir "$OUT_DIR" \
-  "$SKETCH"
+SKETCH_BASENAME="$(basename "$SKETCH")"
+SKETCH_NAME="${SKETCH_BASENAME%.ino}"
+SKETCH_DIR="$OUT_DIR/$SKETCH_NAME"
+
+mkdir -p "$SKETCH_DIR"
+cp -f "$SKETCH" "$SKETCH_DIR/$SKETCH_BASENAME"
+
+IFS=',' read -r -a fqbn_list <<< "$FQBN"
+for fqbn in "${fqbn_list[@]}"; do
+  fqbn_trimmed="$(echo "$fqbn" | xargs)"
+  [ -z "$fqbn_trimmed" ] && continue
+  echo "Building for $fqbn_trimmed"
+  arduino-cli compile \
+    --fqbn "$fqbn_trimmed" \
+    --export-binaries \
+    --output-dir "$OUT_DIR" \
+    "$SKETCH_DIR"
+done
 
 shopt -s nullglob
 bins=("$OUT_DIR"/*.bin)
