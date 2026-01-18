@@ -1,4 +1,4 @@
-FROM arduino/arduino-cli:latest
+FROM ghcr.io/arduino/arduino-cli:latest
 
 ENV ARDUINO_DIRECTORIES_DATA=/opt/arduino
 ENV ARDUINO_DIRECTORIES_USER=/opt/arduino/user
