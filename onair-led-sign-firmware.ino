@@ -856,13 +856,14 @@ void startCaptivePortal() {
   Serial.println();
   Serial.println("== Setup Portal ==");
   Serial.print("AP SSID: "); Serial.println(apSsid);
+  Serial.println(String("AP SSID (full): ") + apSsid);
   Serial.print("AP PASS: "); Serial.println(apPassStr.length() ? apPassStr : String("(open)"));
   Serial.print("AP IP:   "); Serial.println(WiFi.softAPIP());
   if (apPassStr.length()) {
     Serial.println("WiFi QR payload (copy-paste into QR generator):");
     Serial.println(wifiQrPayload(apSsid, apPassStr));
-    Serial.println("WiFi QR URL (QuickChart, size=500):");
-    Serial.println(wifiQrQuickChartUrl(apSsid, apPassStr, 500));
+    String qrUrl = wifiQrQuickChartUrl(apSsid, apPassStr, 500);
+    Serial.println(String("WiFi QR URL (QuickChart, size=500): ") + qrUrl);
   } else {
     Serial.println("WiFi QR payload (copy-paste into QR generator):");
     Serial.println(wifiQrPayload(apSsid, apPassStr));
