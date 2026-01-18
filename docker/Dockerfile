@@ -5,7 +5,7 @@ ENV ARDUINO_DIRECTORIES_USER=/opt/arduino/user
 ENV ARDUINO_CLI_CONFIG_FILE=/opt/arduino/arduino-cli.yaml
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+  && apt-get install -y --no-install-recommends ca-certificates curl xz-utils python3 \
   && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/arduino/user
