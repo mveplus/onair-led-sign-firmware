@@ -630,7 +630,7 @@ String connectedPage() {
   body += "<details class='section'><summary class='hint'>API access</summary>";
   body += "<p>API: <code>/api/status</code>, <code>/api/set?state=1</code>, <code>/api/config</code> • OTA: <code>/update</code></p>";
   body += "<p>Breathing: <code>/api/mode?mode=breathing&period_ms=3000&min_pct=5&max_pct=100</code></p>";
-  body += "<p>API token: <code id='tok'>" + htmlEscape(token) + "</code> <button class='secondary' onclick='copyToken()'>Copy</button></p>";
+  body += "<p>API token: <code id='tok'>" + htmlEscape(token) + "</code> <button id='btnCopy' class='secondary' onclick='copyToken()'>Copy</button></p>";
   body += "</details>";
   body += "<p class='hint' id='msg'></p>";
 
@@ -674,10 +674,13 @@ String connectedPage() {
             "  setBusyBtn('btnOff', false);"
             "}"
             "function copyToken(){"
+            "  const b=document.getElementById('btnCopy');"
+            "  if(b){b.classList.add('active'); b.classList.add('busy');}"
             "  const t=document.getElementById('tok').textContent;"
-            "  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t); setMsg('Token copied'); return;}"
+            "  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t); setMsg('Token copied'); if(b){setTimeout(()=>{b.classList.remove('busy'); b.classList.remove('active');},800);} return;}"
             "  const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select();"
             "  document.execCommand('copy'); document.body.removeChild(ta); setMsg('Token copied');"
+            "  if(b){setTimeout(()=>{b.classList.remove('busy'); b.classList.remove('active');},800);}"
             "}"
             "async function setBreathing(){"
             "  const prev=activeMode;"
@@ -1204,14 +1207,6 @@ void setupHttpHandlers() {
     }
     String body;
     body += "<p>Upload a compiled <b>.bin</b> to update firmware.</p>";
-    body += "<div class='section'>"
-            "<div class='hint'>Current mode</div>"
-            "<div class='btns'>"
-            "<button id='btnModeOn' class='secondary' disabled>ON</button>"
-            "<button id='btnModeOff' class='secondary' disabled>OFF</button>"
-            "<button id='btnModeBreath' class='secondary' disabled>BREATHING</button>"
-            "</div>"
-            "</div>";
     body += "<form method='POST' action='/update' enctype='multipart/form-data'>"
             "<input type='file' name='firmware' accept='.bin' required/>"
             "<div class='btns'><button id='btnUpload' type='submit'>Upload & Update</button></div>"
@@ -1222,20 +1217,6 @@ void setupHttpHandlers() {
               "  const b=document.getElementById('btnUpload');"
               "  const f=document.querySelector('form');"
               "  if(b&&f){f.addEventListener('submit',()=>{b.classList.add('active'); b.classList.add('busy');});}"
-              "  const setMode=(m)=>{"
-              "    const on=document.getElementById('btnModeOn');"
-              "    const off=document.getElementById('btnModeOff');"
-              "    const br=document.getElementById('btnModeBreath');"
-              "    if(on) on.classList.remove('active');"
-              "    if(off) off.classList.remove('active');"
-              "    if(br) br.classList.remove('active');"
-              "    if(m==='on'&&on) on.classList.add('active');"
-              "    if(m==='off'&&off) off.classList.add('active');"
-              "    if(m==='breathing'&&br) br.classList.add('active');"
-              "  };"
-              "  fetch('/api/status').then(r=>r.json()).then(j=>{"
-              "    if(j&&j.ok&&j.output_mode){setMode(j.output_mode);}"
-              "  }).catch(()=>{});"
               "});";
     request->send(200, "text/html", pageShell("OTA Update", body, script));
   });
