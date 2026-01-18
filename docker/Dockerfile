@@ -20,7 +20,7 @@ RUN set -eux; \
     *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; \
   esac; \
   if [ "$ARDUINO_CLI_VERSION" = "latest" ]; then \
-    ARDUINO_CLI_VERSION="$(curl -fsSL https://api.github.com/repos/arduino/arduino-cli/releases/latest | grep -Eo '\"tag_name\"[[:space:]]*:[[:space:]]*\"[^\"]+\"' | cut -d '\"' -f 4)"; \
+    ARDUINO_CLI_VERSION="$(curl -fsSL https://api.github.com/repos/arduino/arduino-cli/releases/latest | sed -n 's/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p')"; \
   fi; \
   ARDUINO_VER="${ARDUINO_CLI_VERSION#v}"; \
   curl -fsSL -o /tmp/arduino-cli.tar.gz "https://github.com/arduino/arduino-cli/releases/download/${ARDUINO_CLI_VERSION}/arduino-cli_${ARDUINO_VER}_${ARDUINO_ARCH}.tar.gz"; \
