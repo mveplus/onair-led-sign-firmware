@@ -2,7 +2,8 @@
 set -euo pipefail
 
 SKETCH=${SKETCH:-onair-led-sign-firmware.ino}
-FQBN=${FQBN:-esp32:esp32:dfrobot_beetle_esp32c6,esp32:esp32:XIAO_ESP32C6}
+FQBN=${FQBN:-esp32:esp32:XIAO_ESP32C6}
+#FQBN=${FQBN:-esp32:esp32:dfrobot_beetle_esp32c6,esp32:esp32:XIAO_ESP32C6}
 OUT_DIR=${OUT_DIR:-build}
 
 mkdir -p "$OUT_DIR"
