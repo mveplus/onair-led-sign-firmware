@@ -127,6 +127,7 @@ static const uint32_t SCAN_MAX_WAIT_MS = 6000;
 // ---------------- Delayed reboot ----------------
 static bool rebootPending = false;
 static uint32_t rebootAtMs = 0;
+static bool otaUpdateOk = false;
 
 // ---------------- Helpers ----------------
 
@@ -1343,15 +1344,17 @@ void setupHttpHandlers() {
         resp->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
         request->send(resp);
       }
-      if (ok) {
+      if (ok || otaUpdateOk) {
         rebootPending = true;
         rebootAtMs = millis() + 4000;
+        otaUpdateOk = false;
       }
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
       if (!ensureApiAuth(request)) return;
       if (index == 0) {
         Serial.printf("OTA start: %s\n", filename.c_str());
+        otaUpdateOk = false;
         if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
           Update.printError(Serial);
         }
@@ -1364,8 +1367,10 @@ void setupHttpHandlers() {
       if (final) {
         if (!Update.end(true)) {
           Update.printError(Serial);
+          otaUpdateOk = false;
         } else {
           Serial.printf("OTA done: %u bytes\n", (unsigned)(index + len));
+          otaUpdateOk = true;
         }
       }
     }
