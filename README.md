@@ -2,7 +2,11 @@
 
 Firmware for an ESP32‑C6 board (default: Seeed XIAO ESP32‑C6) that provides a captive setup portal, a small HTTP API, OTA updates, and a configurable output pin with optional breathing (PWM) mode.
 
-This repo contains a single Arduino sketch plus an API contract document.
+This repo contains a single Arduino sketch and prebuilt [binary](build/onair-led-sign-firmware.ino.bin) 
+
+ [On-Air Meeting Trigger Chrome extention](https://github.com/mveplus/onair-meeting-trigger/) can be used to trigger the OnAir Led/Neon Sign.
+
+![OnAir_Led](resources/Monkey_OnAir.JPG)
 
 ## Features
 
