@@ -17,6 +17,8 @@ This repo contains a single Arduino sketch and prebuilt [binary](build/onair-led
 - Factory reset via BOOT long‑press (5s).
 - Optional breathing output mode using PWM.
 
+![Simple web UI](/resources/RUN_UI.png)
+
 ## Project Layout
 
 - `esp32c6-led-sign-firmware.ino` — main firmware sketch
