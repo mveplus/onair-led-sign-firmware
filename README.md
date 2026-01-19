@@ -20,7 +20,7 @@ This repo contains a single Arduino sketch plus an API contract document.
 
 ## Hardware Defaults
 
-- Board name: `XIAO-ESP32-C6`
+- Board name: [`XIAO-ESP32-C6`](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/#hardware-overview) or [Beetle ESP32-C6](https://wiki.dfrobot.com/SKU_DFR1117_Beetle_ESP32_C6?Board%20Overview#Pin%20Diagram)
 - Built‑in LED: `LED_BUILTIN` (defaults to GPIO8 if not defined by core)
 - BOOT button pin: GPIO9
 - Default output pin: GPIO6
@@ -109,6 +109,43 @@ Tip: After reflashing firmware, it’s often best to **factory reset** (hold BOO
 
 - Default timeout: 10 minutes.
 - If still in setup mode after timeout, the device reboots and retries STA.
+
+## Flashing Firmware
+
+You can either flash the provided binaries from `build/` or upload a locally built sketch with [`arduino-cli`](https://github.com/arduino/arduino-cli) or [`esptool.py`](https://github.com/espressif/esptool)
+
+### Option A: Flash Provided Binaries (from `build/`)
+
+1. Put the board in download mode if needed (hold BOOT, tap RESET).
+2. Connect the board over USB and note the serial port (example: `/dev/ttyACM0`).
+3. Use `esptool.py` to write the merged image:
+
+```bash
+esptool.py --chip esp32c6 --port /dev/ttyACM0 --baud 460800 write_flash 0x0 build/onair-led-sign-firmware.ino.merged.bin
+```
+
+If you need separate images instead of the merged binary, use these offsets:
+
+```bash
+esptool.py --chip esp32c6 --port /dev/ttyACM0 --baud 460800 write_flash \
+  0x0 build/onair-led-sign-firmware.ino.bootloader.bin \
+  0x8000 build/onair-led-sign-firmware.ino.partitions.bin \
+  0x10000 build/onair-led-sign-firmware.ino.bin
+```
+
+### Option B: Build + Upload with `arduino-cli`
+
+1. Build (optional if you already have `build/`):
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:esp32c6 .
+```
+
+2. Upload using the provided build output directory:
+
+```bash
+arduino-cli upload --fqbn esp32:esp32:esp32c6 -p /dev/ttyACM0 --input-dir build
+```
 
 ## Connected Mode UI
 
