@@ -6,7 +6,7 @@ IMAGE=${IMAGE:-onair-led-sign-firmware-arduino}
 docker build -t "$IMAGE" -f docker/Dockerfile .
 
 docker run --rm \
-  -v "$PWD":/workspace \
+  -v "$PWD":/workspace:Z \
   -w /workspace \
   -e FQBN \
   -e SKETCH \
@@ -14,4 +14,4 @@ docker run --rm \
   -e GIT_SHA \
   -e BUILD_DATE \
   "$IMAGE" \
-  /workspace/scripts/build.sh
+  bash /workspace/scripts/build.sh
