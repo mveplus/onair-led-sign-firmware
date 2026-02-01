@@ -92,6 +92,10 @@ static const uint16_t PWM_MAX = (1 << PWM_RES_BITS) - 1;
 static bool pwmAttached = false;
 static int pwmPin = -1;
 
+// ---------------- mDNS state ----------------
+static bool mdnsOk = false;
+static String mdnsHost;
+
 // ---------------- Captive portal / Web server ----------------
 static DNSServer dnsServer;
 static const byte DNS_PORT = 53;
@@ -241,6 +245,31 @@ String defaultHostName() {
   if (out.length() == 0) out = "esp32c6";
   if (out.length() > 32) out.remove(32);
   return out;
+}
+
+String normalizeHostName(const String& in) {
+  String name = in;
+  name.toLowerCase();
+  String out;
+  for (size_t i = 0; i < name.length(); i++) {
+    char c = name[i];
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+      out += c;
+    } else if (c == '-' || c == '_') {
+      out += c;
+    } else {
+      out += '-';
+    }
+  }
+  while (out.length() && out[0] == '-') out.remove(0, 1);
+  while (out.length() && out[out.length() - 1] == '-') out.remove(out.length() - 1, 1);
+  if (out.length() == 0) out = defaultHostName();
+  if (out.length() > 32) out.remove(32);
+  return out;
+}
+
+String configuredHostName() {
+  return normalizeHostName(loadString("host", defaultHostName().c_str()));
 }
 
 void saveConfig(const String& ssid, const String& pass, const String& host, int outPin, bool ledah, bool usebl,
@@ -483,7 +512,7 @@ String pageShell(const String& title, const String& body, const String& script =
 }
 
 String setupPage() {
-  String savedHost = loadString("host", defaultHostName().c_str());
+  String savedHost = configuredHostName();
   String savedSsid = loadString("ssid", "");
   int savedOut = loadInt("out", 6);
   bool savedUseBL = loadBool("usebl", false);
@@ -619,12 +648,15 @@ String setupPage() {
 }
 
 String connectedPage() {
-  String host = loadString("host", defaultHostName().c_str());
+  String host = configuredHostName();
   String ip = WiFi.localIP().toString();
   String token = loadApiToken();
 
   String body;
-  body += "<p><span class='ok'>Connected</span> • IP <b>" + htmlEscape(ip) + "</b> • mDNS <b>" + htmlEscape(host) + ".local</b></p>";
+  String mdnsLine = mdnsOk
+    ? "<span class='ok'>" + htmlEscape(host) + ".local</span>"
+    : "<span class='bad'>not running</span> • Host <b>" + htmlEscape(host) + ".local</b>";
+  body += "<p><span class='ok'>Connected</span> • IP <b>" + htmlEscape(ip) + "</b> • mDNS " + mdnsLine + "</p>";
   body += "<p class='hint'>FW: <code>" + htmlEscape(FW_VERSION) + "</code></p>";
   body += "<div class='btns' style='margin-top:16px'>"
           "<button id='btnOn' class='secondary' onclick='toggle(1)'>ON</button>"
@@ -822,12 +854,49 @@ void stopPortalServices() {
   Serial.println("Setup AP stopped.");
 }
 
+void stopMdns() {
+  if (mdnsOk) {
+    MDNS.end();
+    mdnsOk = false;
+    Serial.println("mDNS stopped");
+  }
+}
+
+void startMdnsIfNeeded() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  String host = configuredHostName();
+  if (mdnsOk && mdnsHost == host) return;
+  if (mdnsOk) MDNS.end();
+  mdnsHost = host;
+  if (MDNS.begin(host.c_str())) {
+    MDNS.addService("http", "tcp", 80);
+    mdnsOk = true;
+    Serial.print("mDNS: http://"); Serial.print(host); Serial.println(".local/");
+  } else {
+    mdnsOk = false;
+    Serial.println("mDNS failed to start");
+  }
+}
+
+void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  switch (event) {
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      startMdnsIfNeeded();
+      break;
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      stopMdns();
+      break;
+    default:
+      break;
+  }
+}
+
 bool connectWifiWithSaved(uint32_t timeoutMs = 12000) {
   String ssid = loadString("ssid", "");
   String pass = loadString("pass", "");
   if (ssid.length() == 0) return false;
 
-  String host = loadString("host", defaultHostName().c_str());
+  String host = configuredHostName();
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(host.c_str());
   WiFi.begin(ssid.c_str(), pass.c_str());
@@ -951,14 +1020,8 @@ void startConnectedServices() {
     prefs.putString("api_token", apiToken);
   }
 
-  // mDNS
-  String host = loadString("host", defaultHostName().c_str());
-  if (MDNS.begin(host.c_str())) {
-    MDNS.addService("http", "tcp", 80);
-    Serial.print("mDNS: http://"); Serial.print(host); Serial.println(".local/");
-  } else {
-    Serial.println("mDNS failed to start");
-  }
+  // mDNS (also retried on WiFi events)
+  startMdnsIfNeeded();
 
   Serial.println();
   Serial.println("== Connected ==");
@@ -1044,7 +1107,7 @@ void setupHttpHandlers() {
         } else {
           String ssid = doc["ssid"] | "";
           String pass = doc["pass"] | "";
-          String host = doc["host"] | "esp32c6";
+          String host = normalizeHostName(doc["host"] | "esp32c6");
           int outPin = doc["out"] | 6;
           bool ledah = doc["ledah"] | true;
           bool usebl = doc["usebl"] | false;
@@ -1115,7 +1178,7 @@ void setupHttpHandlers() {
     doc["mode"] = portalMode ? "ap" : "sta";
     doc["ip"] = portalMode ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
     doc["ssid"] = portalMode ? apSsid : WiFi.SSID();
-    doc["hostname"] = loadString("host", defaultHostName().c_str());
+    doc["hostname"] = configuredHostName();
     doc["fw_version"] = FW_VERSION;
     doc["out_pin"] = loadInt("out", 6);
     doc["led_active_high"] = loadBool("ledah", true);
@@ -1229,7 +1292,7 @@ void setupHttpHandlers() {
     DynamicJsonDocument doc(512);
     doc["ok"] = true;
     doc["ssid"] = loadString("ssid", "");
-    doc["hostname"] = loadString("host", defaultHostName().c_str());
+    doc["hostname"] = configuredHostName();
     doc["out"] = loadInt("out", 6);
     doc["ledah"] = loadBool("ledah", true);
     doc["output_mode"] = outputMode == MODE_BREATHING ? "breathing" : (outputMode == MODE_ON ? "on" : "off");
@@ -1395,6 +1458,9 @@ void setup() {
 
   // Register HTTP routes ONCE (safe before WiFi), but do not begin server yet.
   setupHttpHandlers();
+
+  // WiFi event handling for mDNS lifecycle
+  WiFi.onEvent(onWiFiEvent);
 
   // Boot-time factory reset check
   checkBootTimeFactoryReset();
