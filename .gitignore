@@ -1,0 +1,18 @@
+# --- AWS IoT credentials --------------------------------------------------
+# Per-device certs and keys produced by scripts/provision-device.sh.
+# Never commit these.
+certs/
+
+# Compile-time AWS IoT secrets header — generated per build/device.
+secrets.h
+src/secrets.h
+
+# --- Local toolchain noise ------------------------------------------------
+.DS_Store
+*.swp
+*.swo
+
+# --- Arduino / ESP-IDF intermediate build outputs --------------------------
+# The top-level build/ contents *are* tracked today (release artifacts),
+# but the nested arduino-cli scratch dir is not useful in git history.
+build/onair-led-sign-firmware/

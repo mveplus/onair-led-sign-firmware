@@ -1,0 +1,172 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# AWS auth uses GitHub OIDC, not long-lived keys.
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  FQBN: esp32:esp32:XIAO_ESP32C6
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
+  FW_BUCKET: ${{ vars.FW_BUCKET }}
+  FW_THING_GROUP: ${{ vars.FW_THING_GROUP }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build the firmware on every push. No AWS credentials needed here.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build firmware
+    runs-on: ubuntu-latest
+    outputs:
+      bin_path: ${{ steps.locate.outputs.bin_path }}
+      merged_path: ${{ steps.locate.outputs.merged_path }}
+      sha256: ${{ steps.locate.outputs.sha256 }}
+      size: ${{ steps.locate.outputs.size }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve firmware version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(date -u +%Y-%m-%d)+$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build via docker-build.sh
+        env:
+          FQBN: ${{ env.FQBN }}
+        run: |
+          chmod +x scripts/docker-build.sh scripts/build.sh
+          ./scripts/docker-build.sh
+
+      - name: Locate output binary
+        id: locate
+        run: |
+          set -euo pipefail
+          bin="build/onair-led-sign-firmware.ino.bin"
+          merged="build/onair-led-sign-firmware.ino.merged.bin"
+          test -f "$bin"     || { echo "missing $bin" >&2; exit 1; }
+          test -f "$merged"  || { echo "missing $merged" >&2; exit 1; }
+          sha="$(sha256sum "$bin" | awk '{print $1}')"
+          size="$(stat -c%s "$bin")"
+          echo "bin_path=$bin"         >> "$GITHUB_OUTPUT"
+          echo "merged_path=$merged"   >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha"           >> "$GITHUB_OUTPUT"
+          echo "size=$size"            >> "$GITHUB_OUTPUT"
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ steps.version.outputs.version }}
+          path: |
+            build/onair-led-sign-firmware.ino.bin
+            build/onair-led-sign-firmware.ino.merged.bin
+            build/onair-led-sign-firmware.ino.elf
+            build/sha1sums.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # On a v* tag: upload the .bin to S3 and create an IoT Job for the fleet.
+  # Requires repo vars  AWS_ROLE_ARN, AWS_REGION, FW_BUCKET, FW_THING_GROUP.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Release to AWS IoT
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-${{ needs.build.outputs.version }}
+          path: build/
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload firmware to S3
+        id: s3
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          KEY="firmware/onair-${VERSION}.bin"
+          aws s3 cp \
+            build/onair-led-sign-firmware.ino.bin \
+            "s3://${FW_BUCKET}/${KEY}" \
+            --metadata "sha256=${SHA256},version=${VERSION}" \
+            --content-type application/octet-stream
+          # Presigned URL valid for 24h is enough for the rollout window;
+          # the device verifies sha256 before flashing regardless.
+          URL="$(aws s3 presign "s3://${FW_BUCKET}/${KEY}" --expires-in 86400)"
+          echo "url=$URL"  >> "$GITHUB_OUTPUT"
+          echo "s3_key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Create IoT Job
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+          SIZE: ${{ needs.build.outputs.size }}
+          URL: ${{ steps.s3.outputs.url }}
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          JOB_ID="onair-ota-${VERSION//[^a-zA-Z0-9-]/-}"
+          TARGET_ARN="arn:aws:iot:${AWS_REGION}:${ACCOUNT_ID}:thinggroup/${FW_THING_GROUP}"
+
+          jq -n \
+            --arg op   "ota" \
+            --arg ver  "$VERSION" \
+            --arg url  "$URL" \
+            --arg sha  "$SHA256" \
+            --argjson size "$SIZE" \
+            '{operation:$op, fw_version:$ver, url:$url, sha256:$sha, size:$size}' \
+            > job-document.json
+
+          aws iot create-job \
+            --job-id "$JOB_ID" \
+            --targets "$TARGET_ARN" \
+            --document "file://job-document.json" \
+            --target-selection SNAPSHOT \
+            --job-executions-rollout-config '{
+              "exponentialRate": {
+                "baseRatePerMinute": 5,
+                "incrementFactor": 2,
+                "rateIncreaseCriteria": {"numberOfNotifiedThings": 10}
+              },
+              "maximumPerMinute": 50
+            }' \
+            --abort-config '{
+              "criteriaList": [{
+                "failureType": "FAILED",
+                "action": "CANCEL",
+                "thresholdPercentage": 25,
+                "minNumberOfExecutedThings": 5
+              }]
+            }'
+
+          echo "Created IoT Job: $JOB_ID"
