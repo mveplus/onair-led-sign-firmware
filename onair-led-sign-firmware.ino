@@ -77,7 +77,7 @@ REQUIRED LIBRARIES (as you installed)
 
 // ---------------- Pins / defaults ----------------
 static const int PIN_BOOT = 9;     // BOOT commonly GPIO9
-static int       PIN_OUT  = 6;     // configurable output pin (default GPIO6)
+static int       PIN_OUT  = 18;    // configurable output pin (default GPIO18 = XIAO D10)
 static int       PIN_LED  = LED_BUILTIN;
 
 // LED activation polarity (some boards drive LED LOW to turn on)
@@ -224,6 +224,30 @@ void breathingTick() {
     pct = breathMaxPct - (uint8_t)((span * down) / half);
   }
   outputSetLevelPct(pct);
+}
+
+// Mirror the output mode on the onboard status LED:
+//   OFF       -> LED off
+//   ON        -> LED solid on
+//   BREATHING -> repeating double-flash (blink, blink, pause)
+// Skipped when the built-in LED *is* the output pin (the output logic owns
+// it), during BOOT-button reset feedback, or while in the setup portal.
+void statusLedTick() {
+  if (portalMode || resetFeedbackActive || PIN_OUT == PIN_LED) return;
+
+  if (outputMode == MODE_ON) {
+    ledWrite(true);
+    return;
+  }
+  if (outputMode == MODE_OFF) {
+    ledWrite(false);
+    return;
+  }
+  // MODE_BREATHING: two ~120ms flashes near the start of a 1500ms cycle.
+  const uint32_t CYCLE_MS = 1500;
+  uint32_t t = millis() % CYCLE_MS;
+  bool on = (t < 120) || (t >= 240 && t < 360);
+  ledWrite(on);
 }
 
 String htmlEscape(const String& in) {
@@ -528,14 +552,14 @@ String pageShell(const String& title, const String& body, const String& script =
 String setupPage() {
   String savedHost = configuredHostName();
   String savedSsid = loadString("ssid", "");
-  int savedOut = loadInt("out", 6);
+  int savedOut = loadInt("out", 18);
   bool savedUseBL = loadBool("usebl", false);
   bool savedLedAH = loadBool("ledah", true);
   String savedAuthUser = loadAuthUser();
   String savedAuthPass = loadAuthPass();
   String savedApPass = loadString("ap_pass", "");
   int savedOutEff = savedUseBL ? PIN_LED : savedOut;
-  const int commonPins[] = {6, 7, 8, 9, 10};
+  const int commonPins[] = {18, 6, 7, 8, 9, 10};
   bool outIsCommon = false;
   for (size_t i = 0; i < sizeof(commonPins) / sizeof(commonPins[0]); i++) {
     if (savedOutEff == commonPins[i]) { outIsCommon = true; break; }
@@ -557,9 +581,10 @@ String setupPage() {
   body += "<div><label>Device name</label><input id='host' value='" + htmlEscape(savedHost) + "' autocomplete='off' maxlength='32'/></div>";
   body += "<div><label>Output GPIO</label>"
           "<select id='out_sel'>"
+          "<option value='18'>GPIO 18 (D10)</option>"
           "<option value='6'>GPIO 6</option>"
           "<option value='7'>GPIO 7</option>"
-          "<option value='8'>GPIO 8 (LED)</option>"
+          "<option value='8'>GPIO 8</option>"
           "<option value='9'>GPIO 9</option>"
           "<option value='10'>GPIO 10</option>"
           "<option value='__custom__'>Custom…</option>"
@@ -641,7 +666,7 @@ String setupPage() {
             "  const usebl=document.getElementById('usebl').checked;"
             "  const outSel=document.getElementById('out_sel').value;"
             "  const outCustom=document.getElementById('out_custom').value;"
-            "  const out=(usebl ? -1 : (outSel==='__custom__'?parseInt(outCustom||'6',10):parseInt(outSel,10)));"
+            "  const out=(usebl ? -1 : (outSel==='__custom__'?parseInt(outCustom||'18',10):parseInt(outSel,10)));"
             "  const ledah=document.getElementById('ledah').value==='1';"
             "  const auth_user=document.getElementById('auth_user').value.trim()||'admin';"
             "  const auth_pass=document.getElementById('auth_pass').value||'esp32c6';"
@@ -1012,7 +1037,7 @@ void startConnectedServices() {
   stopPortalServices();
 
   // Apply configured pins
-  PIN_OUT = loadInt("out", 6);
+  PIN_OUT = loadInt("out", 18);
   LED_ACTIVE_HIGH = loadBool("ledah", true);
   pinMode(PIN_OUT, OUTPUT);
   breathPeriodMs = (uint32_t)loadInt("br_period", 3000);
@@ -1198,7 +1223,7 @@ void setupHttpHandlers() {
     doc["ssid"] = portalMode ? apSsid : WiFi.SSID();
     doc["hostname"] = configuredHostName();
     doc["fw_version"] = FW_VERSION;
-    doc["out_pin"] = loadInt("out", 6);
+    doc["out_pin"] = loadInt("out", 18);
     doc["led_active_high"] = loadBool("ledah", true);
     doc["output_mode"] = outputMode == MODE_BREATHING ? "breathing" : (outputMode == MODE_ON ? "on" : "off");
     doc["br_period_ms"] = breathPeriodMs;
@@ -1305,13 +1330,48 @@ void setupHttpHandlers() {
     request->send(200, "application/json", out);
   });
 
+  // Change the output GPIO at runtime without re-running setup.
+  //   POST /api/pin?out=18        -> drive GPIO18 (XIAO D10)
+  //   POST /api/pin?usebl=1       -> use the onboard LED as the output
+  // Persists to NVS and reboots so the new pin initializes cleanly; WiFi
+  // credentials are kept, so the device reconnects on its own.
+  server.on("/api/pin", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!ensureApiAuth(request)) return;
+    DynamicJsonDocument doc(256);
+    bool usebl = request->hasParam("usebl") &&
+                 request->getParam("usebl")->value().toInt() != 0;
+    int outPin = usebl ? PIN_LED
+                       : (request->hasParam("out")
+                              ? request->getParam("out")->value().toInt()
+                              : -999);
+    if (!usebl && (outPin < 0 || outPin > 48)) {
+      doc["ok"] = false;
+      doc["error"] = "Provide out=0..48 or usebl=1";
+      String out;
+      serializeJson(doc, out);
+      request->send(400, "application/json", out);
+      return;
+    }
+    prefs.putInt("out", outPin);
+    prefs.putBool("usebl", usebl);
+    doc["ok"] = true;
+    doc["out_pin"] = outPin;
+    doc["usebl"] = usebl;
+    doc["rebooting"] = true;
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+    delay(250);
+    ESP.restart();
+  });
+
   server.on("/api/config", HTTP_GET, [](AsyncWebServerRequest *request) {
     if (!ensureApiAuth(request)) return;
     DynamicJsonDocument doc(512);
     doc["ok"] = true;
     doc["ssid"] = loadString("ssid", "");
     doc["hostname"] = configuredHostName();
-    doc["out"] = loadInt("out", 6);
+    doc["out"] = loadInt("out", 18);
     doc["ledah"] = loadBool("ledah", true);
     doc["output_mode"] = outputMode == MODE_BREATHING ? "breathing" : (outputMode == MODE_ON ? "on" : "off");
     doc["br_period_ms"] = breathPeriodMs;
@@ -1469,7 +1529,7 @@ void setup() {
   // Setup output pin default early
   {
     bool usebl = loadBool("usebl", false);
-    PIN_OUT = usebl ? PIN_LED : loadInt("out", 6);
+    PIN_OUT = usebl ? PIN_LED : loadInt("out", 18);
   }
   pinMode(PIN_OUT, OUTPUT);
   outputWrite(false);
@@ -1510,6 +1570,9 @@ void loop() {
 
   // Runtime factory reset long-press
   handleResetLongPress();
+
+  // Onboard LED mirrors the output mode (off / on / breathing double-flash)
+  statusLedTick();
 
 #ifdef ENABLE_AWS_IOT
   awsIotLoop();

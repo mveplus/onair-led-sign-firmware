@@ -49,6 +49,17 @@ GET /api/mode?mode=off|on|breathing[&period_ms=500..10000][&min_pct=1..99][&max_
   - `400` if `period_ms`, `min_pct`, or `max_pct` are out of range.
   - `400` if `max_pct` is not greater than `min_pct`.
 
+POST /api/pin?out=0..48
+POST /api/pin?usebl=1
+- Changes the output GPIO at runtime without re-running setup.
+- `out` selects a raw GPIO (e.g. `18` = XIAO D10, the default sign pin).
+- `usebl=1` uses the onboard LED as the output instead of an external pin.
+- Persists to NVS and reboots; WiFi credentials are kept so the device
+  reconnects on its own.
+- Response fields: `ok`, `out_pin`, `usebl`, `rebooting`.
+- Errors:
+  - `400` if neither a valid `out` (0..48) nor `usebl=1` is provided.
+
 GET /api/config
 - Returns stored configuration.
 - Response fields:
