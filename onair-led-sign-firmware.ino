@@ -42,6 +42,14 @@ REQUIRED LIBRARIES (as you installed)
 // ---------- Optional BLE provisioning (compile-time) ----------
 #define ENABLE_BLE_PROV 0
 
+// ---------- AWS IoT (compile-time) ----------
+// Set to 0 to leave the firmware identical to the pre-AWS build.
+#define ENABLE_AWS_IOT 1
+#ifdef ENABLE_AWS_IOT
+  #include "secrets.h"
+  #include "aws_iot.h"
+#endif
+
 #if defined(__has_include)
   #if __has_include(<WiFiProv.h>)
     #include <WiFiProv.h>
@@ -192,6 +200,9 @@ void setOutputMode(int mode) {
   } else if (outputMode == MODE_OFF) {
     outputWrite(false);
   }
+#ifdef ENABLE_AWS_IOT
+  awsIotPublishState(outputMode);
+#endif
 }
 
 void breathingTick() {
@@ -1029,6 +1040,10 @@ void startConnectedServices() {
 
   // Start server now that STA is connected
   server.begin();
+
+#ifdef ENABLE_AWS_IOT
+  awsIotSetup();
+#endif
 }
 
 // ---------------- HTTP handlers ----------------
@@ -1492,6 +1507,10 @@ void loop() {
 
   // Runtime factory reset long-press
   handleResetLongPress();
+
+#ifdef ENABLE_AWS_IOT
+  awsIotLoop();
+#endif
 
   delay(5);
 }
