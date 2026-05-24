@@ -1365,6 +1365,33 @@ void setupHttpHandlers() {
     ESP.restart();
   });
 
+  // Set the onboard LED active level at runtime (active HIGH vs active LOW).
+  //   POST /api/led?ledah=1   -> ON drives the pin HIGH (active-high LED)
+  //   POST /api/led?ledah=0   -> ON drives the pin LOW  (active-low LED)
+  // Applies live (no reboot) and persists to NVS.
+  server.on("/api/led", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!ensureApiAuth(request)) return;
+    DynamicJsonDocument doc(256);
+    if (!request->hasParam("ledah")) {
+      doc["ok"] = false;
+      doc["error"] = "Provide ledah=0|1 (1=active HIGH, 0=active LOW)";
+      String out;
+      serializeJson(doc, out);
+      request->send(400, "application/json", out);
+      return;
+    }
+    LED_ACTIVE_HIGH = request->getParam("ledah")->value().toInt() != 0;
+    prefs.putBool("ledah", LED_ACTIVE_HIGH);
+    // Re-assert the output now so the change is visible immediately; the
+    // onboard status LED is repainted by statusLedTick() on the next loop.
+    if (PIN_OUT == PIN_LED) setOutputMode(outputMode);
+    doc["ok"] = true;
+    doc["led_active_high"] = LED_ACTIVE_HIGH;
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+
   server.on("/api/config", HTTP_GET, [](AsyncWebServerRequest *request) {
     if (!ensureApiAuth(request)) return;
     DynamicJsonDocument doc(512);
