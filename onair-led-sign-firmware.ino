@@ -48,6 +48,9 @@ REQUIRED LIBRARIES (as you installed)
 #ifdef ENABLE_AWS_IOT
   #include "secrets.h"
   #include "aws_iot.h"
+  // mbedTLS handshakes for AWS IoT need ~30 KB of stack; the default 8 KB
+  // Arduino loop task overflows mid-handshake and reboots the chip.
+  SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 #endif
 
 #if defined(__has_include)

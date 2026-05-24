@@ -43,6 +43,33 @@ String topicCmd;
 uint32_t lastReconnectAttempt = 0;
 const uint32_t RECONNECT_BACKOFF_MS = 5000;
 
+bool g_timeSynced = false;
+
+// AWS IoT mutual TLS validates the server certificate's notBefore/notAfter
+// against the system clock. The ESP32 has no RTC, so without an SNTP sync it
+// sits at the 1970 epoch and every handshake fails X.509 date validation.
+// Block (briefly) for the first sync; afterwards it's a no-op.
+bool ensureTimeSynced() {
+  if (g_timeSynced) return true;
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.print("[AWS IoT] syncing time over NTP");
+  time_t now = time(nullptr);
+  for (int i = 0; i < 40 && now < 1700000000; ++i) {  // up to ~8s
+    delay(200);
+    Serial.print(".");
+    now = time(nullptr);
+  }
+  Serial.println();
+  if (now < 1700000000) {
+    Serial.println("[AWS IoT] NTP sync failed (clock still at epoch); TLS will fail");
+    return false;
+  }
+  g_timeSynced = true;
+  Serial.print("[AWS IoT] time synced: ");
+  Serial.println((uint32_t)now);
+  return true;
+}
+
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   Serial.print("[AWS IoT] rx ");
   Serial.print(topic);
@@ -71,6 +98,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
 bool reconnect() {
   if (WiFi.status() != WL_CONNECTED) return false;
+  if (!ensureTimeSynced()) return false;
   Serial.print("[AWS IoT] connecting MQTT as ");
   Serial.print(AWS_IOT_THING_NAME);
   Serial.print(" to ");
@@ -85,8 +113,18 @@ bool reconnect() {
     awsIotPublishState(g_lastPublishedMode);
     return true;
   }
+  int rc = mqtt.state();
   Serial.print("[AWS IoT] MQTT connect failed, rc=");
-  Serial.println(mqtt.state());
+  Serial.println(rc);
+  // rc -4 (MQTT_CONNECTION_TIMEOUT) here means the TLS handshake succeeded
+  // but AWS closed the link after the MQTT CONNECT without a CONNACK. Usual
+  // causes: the endpoint region does not match where the cert/thing are
+  // registered, the cert has no attached IoT policy, or the policy denies
+  // iot:Connect for this client id.
+  if (rc == -4) {
+    Serial.println("[AWS IoT]   TLS ok but no CONNACK -> check the endpoint "
+                   "region and the IoT policy on this cert (client/" AWS_IOT_THING_NAME ")");
+  }
   return false;
 }
 
