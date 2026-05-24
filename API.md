@@ -60,6 +60,15 @@ POST /api/pin?usebl=1
 - Errors:
   - `400` if neither a valid `out` (0..48) nor `usebl=1` is provided.
 
+POST /api/led?ledah=0|1
+- Sets the onboard LED active level. `1` = active HIGH (ON drives the pin
+  HIGH), `0` = active LOW (ON drives the pin LOW). Use `0` for boards whose
+  onboard LED lights when the GPIO is LOW (e.g. XIAO ESP32-C6, GPIO15).
+- Applies live (no reboot) and persists to NVS.
+- Response fields: `ok`, `led_active_high`.
+- Errors:
+  - `400` if `ledah` is missing.
+
 GET /api/config
 - Returns stored configuration.
 - Response fields:
