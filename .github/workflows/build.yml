@@ -42,11 +42,21 @@ jobs:
       - id: version
         name: Resolve firmware version
         run: |
+          # git is available on the runner (not inside the Docker container
+          # the build runs in), so we resolve the SHA here and pass it down
+          # via $GITHUB_ENV. Without this, build.sh ran `git rev-parse`
+          # inside the container, failed silently because git/.git aren't
+          # exposed there, and baked "nogit" into FW_VERSION.
+          SHA="$(git rev-parse --short HEAD)"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            VERSION="${GITHUB_REF#refs/tags/}"
           else
-            echo "version=$(date -u +%Y-%m-%d)+$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+            VERSION="$(date -u +%Y-%m-%d)+${SHA}"
           fi
+          echo "GIT_SHA=${SHA}"      >> "$GITHUB_ENV"
+          echo "FW_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "version=${VERSION}"  >> "$GITHUB_OUTPUT"
+          echo "Resolved FW_VERSION=${VERSION} (GIT_SHA=${SHA})"
 
       - name: Build via docker-build.sh
         env:
