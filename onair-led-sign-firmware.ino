@@ -50,6 +50,7 @@ REQUIRED LIBRARIES (as you installed)
 #endif
 #if ENABLE_AWS_IOT
   #include "aws_iot.h"
+  #include "aws_provisioning.h"
   // mbedTLS handshakes for AWS IoT need ~30 KB of stack; the default 8 KB
   // Arduino loop task overflows mid-handshake and reboots the chip. The
   // bump is unconditional when the AWS module is compiled in — it stays
@@ -775,6 +776,20 @@ String connectedPage() {
   body += "</div>";
   body += "<p class='hint'>Cert and key are POSTed to <code>/api/aws/provision</code> and stored in NVS. They are never echoed back by the device.</p>";
   body += "</details>";
+
+  body += "<details class='section'><summary class='hint'>AWS IoT — Fleet Provisioning by Claim</summary>";
+  body += "<p class='hint'>Bootstrap a per-device identity using a shared claim cert. Set up a Provisioning Template + claim cert in AWS IoT first; the claim cert is used once and never stored on the device.</p>";
+  body += "<div><label>Endpoint</label><input id='awsClaimEndpoint' placeholder='xxxx-ats.iot.&lt;region&gt;.amazonaws.com' autocomplete='off'/></div>";
+  body += "<div><label>Provisioning template name</label><input id='awsClaimTemplate' placeholder='OnAirSignProvisioningTemplate' autocomplete='off'/></div>";
+  body += "<details><summary class='hint'>Override Root CA (optional)</summary>";
+  body += "<textarea id='awsClaimCa' rows='6' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea>";
+  body += "</details>";
+  body += "<div><label>Claim certificate (PEM)</label><textarea id='awsClaimCert' rows='8' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "<div><label>Claim private key (PEM)</label><textarea id='awsClaimKey' rows='8' placeholder='-----BEGIN PRIVATE KEY-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "<div><label>Parameters (optional JSON object)</label><textarea id='awsClaimParams' rows='3' placeholder='{\"SerialNumber\":\"...\",\"Location\":\"office\"}' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "<div class='btns'><button id='btnAwsClaim' class='secondary' onclick='awsRunClaim()'>Run claim flow</button></div>";
+  body += "<p class='hint'>Takes ~10-30 seconds. On success the device persists the resulting per-device cert and reconnects automatically; the claim cert is dropped.</p>";
+  body += "</details>";
 #endif
   body += "<details class='section'><summary class='hint'>API access</summary>";
   body += "<p>API: <code>/api/status</code>, <code>/api/set?state=1</code>, <code>/api/config</code>, <code>/api/reboot</code> • OTA: <code>/update</code></p>";
@@ -926,6 +941,30 @@ String connectedPage() {
             "    if(j.ok){ setMsg('AWS IoT credentials cleared.'); awsRefreshStatus(); }"
             "  }catch(e){ setMsg('Forget failed', true); }"
             "  setBusyBtn('btnAwsForget', false);"
+            "}"
+            "async function awsRunClaim(){"
+            "  const endpoint=document.getElementById('awsClaimEndpoint').value.trim();"
+            "  const root_ca=document.getElementById('awsClaimCa').value;"
+            "  const claim_cert=document.getElementById('awsClaimCert').value;"
+            "  const claim_key=document.getElementById('awsClaimKey').value;"
+            "  const template_name=document.getElementById('awsClaimTemplate').value.trim();"
+            "  const parameters=document.getElementById('awsClaimParams').value;"
+            "  if(!endpoint||!claim_cert||!claim_key||!template_name){"
+            "    setMsg('Endpoint, claim cert, claim key, and template required', true); return;"
+            "  }"
+            "  setMsg('Running claim flow — this can take up to ~30s…');"
+            "  setBusyBtn('btnAwsClaim', true);"
+            "  try{"
+            "    const r=await fetchWithTimeout('/api/aws/claim', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({endpoint, root_ca, claim_cert, claim_key, template_name, parameters})}, 45000);"
+            "    const j=await r.json();"
+            "    if(j.ok){"
+            "      setMsg('Provisioned. Thing='+j.thing);"
+            "      document.getElementById('awsClaimCert').value='';"
+            "      document.getElementById('awsClaimKey').value='';"
+            "      setTimeout(awsRefreshStatus, 1500);"
+            "    } else { setMsg('Claim failed ('+(j.status||'?')+'): '+(j.error||'unknown'), true); }"
+            "  }catch(e){ setMsg('Claim request failed (device busy or rebooting)', true); }"
+            "  setBusyBtn('btnAwsClaim', false);"
             "}"
 #endif
             "async function initStateFromDevice(){"
@@ -1723,6 +1762,66 @@ void setupHttpHandlers() {
     awsIotForget();
     request->send(200, "application/json", "{\"ok\":true}");
   });
+
+  // Fleet Provisioning by Claim — runs the MQTT exchange synchronously
+  // (~10-20 s, up to 30 s under timeout). Body is JSON
+  //   {"endpoint":"...", "root_ca"?:"...", "claim_cert":"...",
+  //    "claim_key":"...", "template_name":"...", "parameters"?: "{...}"}
+  // On success the persistent AWS module has already been re-inited
+  // with the new permanent identity. The claim cert is never persisted.
+  server.on("/api/aws/claim", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      if (!ensureApiAuth(request)) return;
+      String *body = reinterpret_cast<String*>(request->_tempObject);
+      if (index == 0) {
+        delete body;
+        body = new String();
+        body->reserve(total);
+        request->_tempObject = body;
+      }
+      if (!body) return;
+      body->concat((char*)data, len);
+      if (index + len != total) return;
+
+      // Claim cert + key together can run ~3 KB; pad for root_ca too.
+      DynamicJsonDocument doc(8192);
+      DeserializationError err = deserializeJson(doc, *body);
+      delete body;
+      request->_tempObject = nullptr;
+
+      DynamicJsonDocument resp(384);
+      if (err) {
+        resp["ok"] = false;
+        resp["error"] = "Bad JSON";
+        String out;
+        serializeJson(resp, out);
+        request->send(200, "application/json", out);
+        return;
+      }
+
+      String endpoint   = doc["endpoint"]      | "";
+      String root_ca    = doc["root_ca"]       | "";
+      String claim_cert = doc["claim_cert"]    | "";
+      String claim_key  = doc["claim_key"]     | "";
+      String tpl        = doc["template_name"] | doc["template"] | "";
+      String params     = doc["parameters"]    | "";
+
+      String outThing, outErr;
+      AwsClaimResult r = awsClaim(endpoint, root_ca, claim_cert, claim_key,
+                                  tpl, params, outThing, outErr);
+      if (r == AWS_CLAIM_OK) {
+        resp["ok"]     = true;
+        resp["thing"]  = outThing;
+        resp["status"] = "ok";
+      } else {
+        resp["ok"]     = false;
+        resp["status"] = awsClaimResultName(r);
+        resp["error"]  = outErr;
+      }
+      String out;
+      serializeJson(resp, out);
+      request->send(200, "application/json", out);
+    });
 #endif
 }
 
