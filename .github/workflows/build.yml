@@ -77,48 +77,64 @@ jobs:
           ELF="build/onair-led-sign-firmware.ino.elf"
           test -f "$ELF" || { echo "missing $ELF" >&2; exit 1; }
 
-          # The strings dump from the linked ELF includes captive-portal HTML
-          # for the AWS provisioning forms, which carries placeholders like
-          #   placeholder='xxxx-ats.iot.&lt;region&gt;.amazonaws.com'
-          #   placeholder='-----BEGIN CERTIFICATE-----'
-          #   placeholder='-----BEGIN PRIVATE KEY-----'
-          # These trigger naive `amazonaws.com` / `BEGIN ... PRIVATE KEY` /
-          # `BEGIN CERTIFICATE` greps as false positives. Tighten the
-          # patterns to avoid the UI strings while still catching real
-          # leaks:
+          # The strings dump from the linked ELF picks up three categories
+          # of PEM-marker-shaped noise that are NOT real credentials:
+          #   1. Captive-portal HTML placeholder attrs:
+          #        placeholder='xxxx-ats.iot.&lt;region&gt;.amazonaws.com'
+          #        placeholder='-----BEGIN PRIVATE KEY-----'
+          #        placeholder='-----BEGIN CERTIFICATE-----'
+          #   2. mbedTLS PEM-parsing constants — linking setPrivateKey()
+          #      and setCertificate() pulls in literals like
+          #        -----BEGIN/END CERTIFICATE-----
+          #        -----BEGIN/END RSA PRIVATE KEY-----
+          #        -----BEGIN/END EC PRIVATE KEY-----
+          #      used internally by the parser, all as bare strings with
+          #      no base64 content attached.
+          #   3. Comments / docstrings that mention PEM markers but were
+          #      stripped (no compiled remnant).
           #
-          # 1. Endpoints: require the full <alnum>-ats.iot.<alnum-or-dash>+
-          #    .amazonaws.com pattern. The placeholder's `&lt;region&gt;`
-          #    section contains `&` and `;` which break this regex; a real
-          #    endpoint passes it.
-          # 2. PEM private keys: match on `END [...] PRIVATE KEY` rather
-          #    than `BEGIN [...] PRIVATE KEY`. The captive-portal
-          #    placeholder only ever carries the BEGIN marker, never an
-          #    END line, so this de-noises completely.
-          # 3. PEM certificates: count `END CERTIFICATE` instead of
-          #    `BEGIN CERTIFICATE`. Same logic — placeholders never carry
-          #    END markers. The bundled Amazon Root CA 1 contributes
-          #    exactly one END line; >1 means a real cert leaked in.
+          # The robust discriminator: every real X.509 certificate and
+          # PKCS-encoded private key base64-encodes an ASN.1 SEQUENCE
+          # (first byte 0x30), which always renders as a base64 line
+          # starting with "MII". HTML placeholders and library constants
+          # never have a base64 body, so counting distinct MII-prefixed
+          # lines gives the actual number of PEM blobs in the binary.
 
+          # Reject real ATS endpoints: full <alnum>-ats.iot.<alnum-or-dash>+
+          # .amazonaws.com pattern. Placeholder's `&lt;region&gt;` section
+          # contains `&` and `;` and never matches; a real endpoint does.
           BAD_HOST="$(strings "$ELF" | grep -E '[a-z0-9]+-ats\.iot\.[a-z0-9-]+\.amazonaws\.com' || true)"
-          BAD_KEY="$(strings "$ELF"  | grep -E '\-\-\-\-\-END [A-Z ]*PRIVATE KEY\-\-\-\-\-' || true)"
-          CERT_COUNT="$(strings "$ELF" | grep -c -E '\-\-\-\-\-END CERTIFICATE\-\-\-\-\-' || echo 0)"
+
+          # Distinct base64 PEM-body start lines.
+          PEM_STARTS="$(strings "$ELF" | grep -E '^MII[A-Za-z0-9+/=]{50,}$' | sort -u || true)"
+          PEM_COUNT=0
+          if [ -n "$PEM_STARTS" ]; then
+            PEM_COUNT="$(printf '%s\n' "$PEM_STARTS" | wc -l)"
+          fi
+
+          # Known marker for the bundled Amazon Root CA 1 — first base64
+          # line of its PEM body. If this is missing the bundled CA was
+          # not linked in correctly; if it's present but PEM_COUNT > 1,
+          # some other cert or key got embedded as well.
+          AMAZON_CA1_FIRST='MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF'
 
           fail=0
           if [ -n "$BAD_HOST" ]; then
             echo "::error::endpoint string in binary: $BAD_HOST"
             fail=1
           fi
-          if [ -n "$BAD_KEY" ]; then
-            echo "::error::private key (END marker) in binary"
+          if ! printf '%s\n' "$PEM_STARTS" | grep -qxF "$AMAZON_CA1_FIRST"; then
+            echo "::error::bundled Amazon Root CA 1 not found in binary"
             fail=1
           fi
-          if [ "$CERT_COUNT" -gt 1 ]; then
-            echo "::error::found $CERT_COUNT END CERTIFICATE blocks in binary; expected 1 (Amazon Root CA 1)"
+          if [ "$PEM_COUNT" -gt 1 ]; then
+            echo "::error::found $PEM_COUNT distinct PEM bodies in binary; expected 1 (Amazon Root CA 1)"
+            echo "matched first-base64 lines:"
+            printf '%s\n' "$PEM_STARTS" | sed 's/^/  /'
             fail=1
           fi
           if [ $fail -eq 0 ]; then
-            echo "secret-scan: clean ($CERT_COUNT certificate block)"
+            echo "secret-scan: clean (1 PEM body found: Amazon Root CA 1)"
           fi
           exit $fail
 
