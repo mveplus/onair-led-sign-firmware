@@ -10,8 +10,12 @@
 //
 // Reconnect strategy: passive — awsIotLoop() retries every 5s when the
 // MQTT link is down. We never block the main loop.
+//
+// ENABLE_AWS_IOT comes from the build system (-DENABLE_AWS_IOT=1 in
+// scripts/build.sh). We do NOT redefine it here — that would silently
+// override the build configuration in a single translation unit and
+// turn off the feature only for sketches that don't link this file.
 
-#define ENABLE_AWS_IOT 1
 #include "aws_iot.h"
 
 #if ENABLE_AWS_IOT
