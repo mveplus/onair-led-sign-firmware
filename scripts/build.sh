@@ -19,7 +19,11 @@ cp -f *.h *.cpp "$SKETCH_DIR/" 2>/dev/null || true
 GIT_SHA="${GIT_SHA:-$(git rev-parse --short HEAD 2>/dev/null || true)}"
 [ -z "$GIT_SHA" ] && GIT_SHA="nogit"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y-%m-%d)}"
-FW_VERSION="${BUILD_DATE}+${GIT_SHA}"
+# FW_VERSION is honored as-is if the caller already set it (CI passes the
+# tag name for v* builds, the git-described SHA for branch builds). Only
+# fall back to the date+sha pattern when nothing was provided — that's
+# what local hand-runs of build.sh hit.
+FW_VERSION="${FW_VERSION:-${BUILD_DATE}+${GIT_SHA}}"
 
 IFS=',' read -r -a fqbn_list <<< "$FQBN"
 for fqbn in "${fqbn_list[@]}"; do
