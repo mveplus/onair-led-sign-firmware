@@ -460,6 +460,29 @@ void handleSerialStickerCommand() {
         mfg.clear();
         delay(200);
         ESP.restart();
+      } else if (cmd == "GET-NET") {
+        // Always-available current-state report. Useful after the
+        // bench step to confirm the device actually joined Wi-Fi and
+        // to grab IP + mDNS hostname without scanning the LAN.
+        StaticJsonDocument<320> doc;
+        doc["mac"] = WiFi.macAddress();
+        doc["fw"]  = FW_VERSION;
+        if (WiFi.status() == WL_CONNECTED) {
+          String host      = configuredHostName();
+          doc["connected"] = true;
+          doc["ip"]        = WiFi.localIP().toString();
+          doc["ssid"]      = WiFi.SSID();
+          doc["rssi"]      = WiFi.RSSI();
+          doc["hostname"]  = host;
+          doc["mdns"]      = host + ".local";
+          doc["mdns_ok"]   = mdnsOk;
+        } else {
+          doc["connected"] = false;
+        }
+        String out;
+        serializeJson(doc, out);
+        Serial.print("NET:");
+        Serial.println(out);
       }
     } else if (buffer.length() < 64) {
       buffer += c;
