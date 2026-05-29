@@ -89,6 +89,29 @@ def request_reset_mfg(port: str, baud: int, settle_secs: float = 6.0) -> None:
     time.sleep(settle_secs)
 
 
+def request_net(port: str, baud: int, timeout: float = 3.0) -> dict:
+    """Send GET-NET and return the parsed JSON status. Not gated by
+    stk_lock — always available. Shape:
+      {connected: bool, mac, fw, ip?, ssid?, rssi?, hostname?, mdns?, mdns_ok?}
+    """
+    with serial.Serial(port, baud, timeout=0.5) as ser:
+        time.sleep(0.3)
+        ser.reset_input_buffer()
+        ser.write(b"GET-NET\n")
+        ser.flush()
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            line = ser.readline().decode(errors="replace").strip()
+            if not line or not line.startswith("NET:"):
+                continue
+            payload = line[len("NET:") :]
+            try:
+                return json.loads(payload)
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"invalid JSON from device: {e}: {payload!r}")
+        raise TimeoutError(f"no NET: response within {timeout}s")
+
+
 def make_wifi_uri(ssid: str, password: str) -> str:
     # Wi-Fi join URI per the de-facto standard used by phone cameras.
     # Escape backslash, semicolon, comma, colon, and quote with a backslash.
@@ -135,6 +158,15 @@ def main() -> int:
             "previously printed sticker becomes invalid."
         ),
     )
+    ap.add_argument(
+        "--connect", nargs="?", const=60, type=int, default=None,
+        metavar="SECS",
+        help=(
+            "After the sticker step, wait up to SECS (default 60) for the "
+            "device to join its STA network and print IP, hostname, mDNS "
+            "name, SSID, and RSSI over Serial."
+        ),
+    )
     args = ap.parse_args()
 
     if args.reset:
@@ -170,28 +202,74 @@ def main() -> int:
         print(f"error: {last_err}", file=sys.stderr)
         return 1
 
+    sticker_rendered = False
     if info.get("locked"):
+        if args.connect is None:
+            print(
+                "device reports stk_lock=true — first STA join already "
+                "happened. Re-run with --reset to rotate the AP password "
+                "and unlock the read.\n"
+                "(--reset invalidates any previously printed sticker.)",
+                file=sys.stderr,
+            )
+            return 2
+        # --connect was requested; carry on to the network-info step
+        # rather than bailing on the sticker lock.
         print(
-            "device reports stk_lock=true — first STA join already "
-            "happened. Re-run with --reset to rotate the AP password "
-            "and unlock the read.\n"
-            "(--reset invalidates any previously printed sticker.)",
+            "(sticker locked — skipping QR render; --reset would rotate.)",
             file=sys.stderr,
         )
-        return 2
+    else:
+        mac = str(info["mac"]).replace(":", "").lower()
+        ssid = info["ssid"]
+        password = info["password"]
+        uri = make_wifi_uri(ssid, password)
+        out_path = args.out or f"sticker-{mac}.png"
+        render_qr(uri, out_path)
+        sticker_rendered = True
 
-    mac = str(info["mac"]).replace(":", "").lower()
-    ssid = info["ssid"]
-    password = info["password"]
-    uri = make_wifi_uri(ssid, password)
-    out_path = args.out or f"sticker-{mac}.png"
-    render_qr(uri, out_path)
+        print(f"MAC      : {info['mac']}")
+        print(f"SSID     : {ssid}")
+        print(f"Password : {password}")
+        print(f"QR URI   : {uri}")
+        print(f"Saved    : {out_path}")
 
-    print(f"MAC      : {info['mac']}")
-    print(f"SSID     : {ssid}")
-    print(f"Password : {password}")
-    print(f"QR URI   : {uri}")
-    print(f"Saved    : {out_path}")
+    if args.connect is None:
+        return 0
+
+    print(
+        f"\nwaiting up to {args.connect}s for device to join STA…",
+        file=sys.stderr,
+    )
+    deadline = time.time() + args.connect
+    net = None
+    while time.time() < deadline:
+        try:
+            n = request_net(args.port, args.baud)
+            if n.get("connected"):
+                net = n
+                break
+        except (OSError, TimeoutError, RuntimeError):
+            pass
+        time.sleep(2)
+
+    if net is None:
+        print(
+            f"device did not join STA within {args.connect}s — "
+            "either Wi-Fi isn't configured yet (captive portal at the "
+            "Setup AP) or the network is out of range.",
+            file=sys.stderr,
+        )
+        return 0 if sticker_rendered else 1
+
+    host = net.get("hostname", "")
+    print(f"IP       : {net['ip']}")
+    print(f"Hostname : {host}")
+    print(f"mDNS     : {net.get('mdns', host + '.local')}"
+          f"  ({'up' if net.get('mdns_ok') else 'down'})")
+    print(f"SSID     : {net.get('ssid', '')}")
+    print(f"RSSI     : {net.get('rssi', '?')} dBm")
+    print(f"FW       : {net.get('fw', '')}")
     return 0
 
 
