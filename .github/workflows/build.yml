@@ -8,38 +8,39 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# AWS auth uses GitHub OIDC, not long-lived keys.
+# id-token: write — OIDC for the AWS IoT OTA job (only fires on tag).
+# contents: write — needed by the release job for `gh release create`.
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 env:
-  FQBN: esp32:esp32:XIAO_ESP32C6
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
-  FW_BUCKET: ${{ vars.FW_BUCKET }}
-  FW_THING_GROUP: ${{ vars.FW_THING_GROUP }}
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Build the firmware on every push. No AWS credentials needed here.
+  # Build firmware for every supported board in parallel. A secret-scan guard
+  # ensures the resulting binaries never contain AWS endpoints, per-device
+  # private keys, or unexpected certificate blocks. The bundled Amazon Root
+  # CA 1 is allowed (exactly one BEGIN CERTIFICATE block expected).
   # ---------------------------------------------------------------------------
   build:
-    name: Build firmware
+    name: Build (${{ matrix.board.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - { name: xiao_esp32c6,           fqbn: "esp32:esp32:XIAO_ESP32C6" }
+          - { name: dfrobot_beetle_esp32c6, fqbn: "esp32:esp32:dfrobot_beetle_esp32c6" }
     outputs:
-      bin_path: ${{ steps.locate.outputs.bin_path }}
-      merged_path: ${{ steps.locate.outputs.merged_path }}
-      sha256: ${{ steps.locate.outputs.sha256 }}
-      size: ${{ steps.locate.outputs.size }}
       version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
-      - name: Resolve firmware version
-        id: version
+      - id: version
+        name: Resolve firmware version
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
@@ -49,94 +50,153 @@ jobs:
 
       - name: Build via docker-build.sh
         env:
-          FQBN: ${{ env.FQBN }}
+          FQBN: ${{ matrix.board.fqbn }}
+          OUT_DIR: build
+          # ENABLE_AWS_IOT defaults to 1 in scripts/build.sh; pinned here for
+          # clarity. The runtime-loaded credentials flow means the binary
+          # still has no AWS material baked in.
+          ENABLE_AWS_IOT: "1"
         run: |
           chmod +x scripts/docker-build.sh scripts/build.sh
           ./scripts/docker-build.sh
 
-      - name: Locate output binary
-        id: locate
+      - name: Secret-scan guard
         run: |
           set -euo pipefail
-          bin="build/onair-led-sign-firmware.ino.bin"
-          merged="build/onair-led-sign-firmware.ino.merged.bin"
-          test -f "$bin"     || { echo "missing $bin" >&2; exit 1; }
-          test -f "$merged"  || { echo "missing $merged" >&2; exit 1; }
-          sha="$(sha256sum "$bin" | awk '{print $1}')"
-          size="$(stat -c%s "$bin")"
-          echo "bin_path=$bin"         >> "$GITHUB_OUTPUT"
-          echo "merged_path=$merged"   >> "$GITHUB_OUTPUT"
-          echo "sha256=$sha"           >> "$GITHUB_OUTPUT"
-          echo "size=$size"            >> "$GITHUB_OUTPUT"
+          ELF="build/onair-led-sign-firmware.ino.elf"
+          test -f "$ELF" || { echo "missing $ELF" >&2; exit 1; }
 
-      - name: Upload firmware artifacts
+          # 1. No ATS endpoint baked in.
+          BAD_HOST="$(strings "$ELF" | grep -E 'amazonaws\.com' || true)"
+          # 2. No per-device private key.
+          BAD_KEY="$(strings "$ELF"  | grep -E 'BEGIN [A-Z ]*PRIVATE KEY' || true)"
+          # 3. Exactly one BEGIN CERTIFICATE block (the bundled Amazon Root
+          #    CA 1). More than one → a per-device cert leaked in.
+          CERT_COUNT="$(strings "$ELF" | grep -c -E 'BEGIN CERTIFICATE' || echo 0)"
+
+          fail=0
+          if [ -n "$BAD_HOST" ]; then
+            echo "::error::endpoint string in binary: $BAD_HOST"
+            fail=1
+          fi
+          if [ -n "$BAD_KEY" ]; then
+            echo "::error::private key in binary (masked)"
+            fail=1
+          fi
+          if [ "$CERT_COUNT" -gt 1 ]; then
+            echo "::error::found $CERT_COUNT BEGIN CERTIFICATE blocks in binary; expected 1 (Amazon Root CA 1)"
+            fail=1
+          fi
+          if [ $fail -eq 0 ]; then
+            echo "secret-scan: clean ($CERT_COUNT certificate block)"
+          fi
+          exit $fail
+
+      - name: Rename and checksum
+        env:
+          BOARD:   ${{ matrix.board.name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          PREFIX="onair-led-sign-${BOARD}-${VERSION}"
+          cp build/onair-led-sign-firmware.ino.merged.bin "out/${PREFIX}.merged.bin"
+          cp build/onair-led-sign-firmware.ino.bin        "out/${PREFIX}.bin"
+          cp build/onair-led-sign-firmware.ino.elf        "out/${PREFIX}.elf"
+          (cd out && sha256sum "${PREFIX}".* > "${PREFIX}.SHA256SUMS.txt")
+
+      - name: Upload board artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ steps.version.outputs.version }}
-          path: |
-            build/onair-led-sign-firmware.ino.bin
-            build/onair-led-sign-firmware.ino.merged.bin
-            build/onair-led-sign-firmware.ino.elf
-            build/sha1sums.txt
+          name: firmware-${{ matrix.board.name }}-${{ steps.version.outputs.version }}
+          path: out/*
           if-no-files-found: error
           retention-days: 30
 
   # ---------------------------------------------------------------------------
-  # On a v* tag: upload the .bin to S3 and create an IoT Job for the fleet.
-  # Requires repo vars  AWS_ROLE_ARN, AWS_REGION, FW_BUCKET, FW_THING_GROUP.
+  # On a v* tag: bundle every board's artifacts into one GitHub Release. No
+  # AWS dependency — works for any fork of the project.
   # ---------------------------------------------------------------------------
   release:
-    name: Release to AWS IoT
+    name: GitHub Release
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          pattern: firmware-*
+          merge-multiple: true
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF#refs/tags/}"
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --notes "Automated release. AWS IoT provisioning, OTA, and the local-only flash flow are covered in PROVISIONING_PLAN.md." \
+            release-assets/*
+
+  # ---------------------------------------------------------------------------
+  # Optional AWS IoT OTA push. Skipped when AWS_OTA_BUCKET is not set as a
+  # repo/org variable. Uploads the XIAO board's .bin to S3 and (when
+  # FW_THING_GROUP is also set) creates a tagged IoT Job.
+  # ---------------------------------------------------------------------------
+  ota:
+    name: AWS IoT OTA
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && vars.AWS_OTA_BUCKET != ''
+    runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download firmware artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: firmware-${{ needs.build.outputs.version }}
-          path: build/
+          name: firmware-xiao_esp32c6-${{ needs.build.outputs.version }}
+          path: assets/
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Upload firmware to S3
-        id: s3
+      - id: s3
+        name: Upload to S3
         env:
           VERSION: ${{ needs.build.outputs.version }}
-          SHA256: ${{ needs.build.outputs.sha256 }}
+          BUCKET:  ${{ vars.AWS_OTA_BUCKET }}
         run: |
           set -euo pipefail
+          BIN="$(ls assets/onair-led-sign-xiao_esp32c6-*.bin | grep -v merged.bin | head -n1)"
+          SHA="$(sha256sum "$BIN" | awk '{print $1}')"
+          SIZE="$(stat -c%s "$BIN")"
           KEY="firmware/onair-${VERSION}.bin"
-          aws s3 cp \
-            build/onair-led-sign-firmware.ino.bin \
-            "s3://${FW_BUCKET}/${KEY}" \
-            --metadata "sha256=${SHA256},version=${VERSION}" \
+          aws s3 cp "$BIN" "s3://${BUCKET}/${KEY}" \
+            --metadata "sha256=${SHA},version=${VERSION}" \
             --content-type application/octet-stream
-          # Presigned URL valid for 24h is enough for the rollout window;
-          # the device verifies sha256 before flashing regardless.
-          URL="$(aws s3 presign "s3://${FW_BUCKET}/${KEY}" --expires-in 86400)"
-          echo "url=$URL"  >> "$GITHUB_OUTPUT"
-          echo "s3_key=$KEY" >> "$GITHUB_OUTPUT"
+          URL="$(aws s3 presign "s3://${BUCKET}/${KEY}" --expires-in 86400)"
+          echo "url=$URL"     >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA"  >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE"   >> "$GITHUB_OUTPUT"
 
       - name: Create IoT Job
+        if: vars.FW_THING_GROUP != ''
         env:
           VERSION: ${{ needs.build.outputs.version }}
-          SHA256: ${{ needs.build.outputs.sha256 }}
-          SIZE: ${{ needs.build.outputs.size }}
-          URL: ${{ steps.s3.outputs.url }}
+          SHA256:  ${{ steps.s3.outputs.sha256 }}
+          SIZE:    ${{ steps.s3.outputs.size }}
+          URL:     ${{ steps.s3.outputs.url }}
         run: |
           set -euo pipefail
           ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
           JOB_ID="onair-ota-${VERSION//[^a-zA-Z0-9-]/-}"
-          TARGET_ARN="arn:aws:iot:${AWS_REGION}:${ACCOUNT_ID}:thinggroup/${FW_THING_GROUP}"
+          TARGET_ARN="arn:aws:iot:${AWS_REGION}:${ACCOUNT_ID}:thinggroup/${{ vars.FW_THING_GROUP }}"
 
           jq -n \
             --arg op   "ota" \
