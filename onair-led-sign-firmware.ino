@@ -136,7 +136,8 @@ static uint32_t portalStartedMs = 0;
 // ---------------- Factory reset long-press ----------------
 static bool bootPressed = false;
 static uint32_t bootPressStart = 0;
-static const uint32_t RESET_HOLD_MS = 5000;
+static const uint32_t RESET_HOLD_MS      = 5000;   // ≥ this on release → factory reset (cfg only)
+static const uint32_t DEEP_RESET_HOLD_MS = 15000;  // ≥ this while held → deep reset (cfg + mfg)
 static bool resetFeedbackActive = false;
 static int savedOutputMode = MODE_OFF;
 
@@ -165,7 +166,17 @@ void ledWrite(bool on) {
 void ledSlowBlinkTick() {
   static uint32_t last = 0;
   static bool state = false;
-  if (millis() - last >= 500) { // slow blink
+  if (millis() - last >= 500) { // slow blink — pre-factory-reset window (0–5 s)
+    last = millis();
+    state = !state;
+    ledWrite(state);
+  }
+}
+
+void ledFastBlinkTick() {
+  static uint32_t last = 0;
+  static bool state = false;
+  if (millis() - last >= 150) { // fast blink — distinguishes the pre-deep-reset window (5–15 s)
     last = millis();
     state = !state;
     ledWrite(state);
@@ -1039,9 +1050,22 @@ String connectedPage() {
 // ---------------- Factory reset ----------------
 
 void doFactoryReset() {
-  Serial.println("\nFACTORY RESET: clearing saved config…");
+  Serial.println("\nFACTORY RESET: clearing saved config (cfg)…");
   ledWrite(true);
   clearConfig();
+  delay(300);
+  ESP.restart();
+}
+
+void doDeepFactoryReset() {
+  // Same as factory reset, plus wipes the "mfg" namespace — rotates the
+  // AP password and clears stk_lock. Any previously printed sticker
+  // becomes invalid; the next boot generates a fresh ap_pass and
+  // GET-STICKER is unlocked again.
+  Serial.println("\nDEEP FACTORY RESET: clearing cfg + mfg…");
+  ledWrite(true);
+  prefs.clear();
+  mfg.clear();
   delay(300);
   ESP.restart();
 }
@@ -1103,6 +1127,17 @@ void handleResetLongPress() {
     Serial.print("[BOOT] released after ");
     Serial.print(held);
     Serial.println(" ms");
+    // Release-triggered factory reset (cfg only). Releases <5 s are
+    // ignored; ≥15 s releases shouldn't reach here because the hold
+    // branch above fires the deep reset immediately at 15 s — but
+    // guard anyway in case of an unusually long debounce window.
+    if (held >= DEEP_RESET_HOLD_MS) {
+      Serial.println("[BOOT] release after ≥15s -> deep factory reset (cfg + mfg)");
+      doDeepFactoryReset();
+    } else if (held >= RESET_HOLD_MS) {
+      Serial.println("[BOOT] release after ≥5s -> factory reset (cfg only)");
+      doFactoryReset();
+    }
     return;
   }
   if (pressed) {
@@ -1117,19 +1152,24 @@ void handleResetLongPress() {
       Serial.println(" ms");
     }
     if (held < RESET_HOLD_MS) {
-      ledSlowBlinkTick();
+      ledSlowBlinkTick();    // 0–5 s: pre-factory-reset blink
+    } else if (held < DEEP_RESET_HOLD_MS) {
+      ledFastBlinkTick();    // 5–15 s: release for cfg-only reset, or hold to deep
     } else {
-      Serial.println("[BOOT] threshold reached, factory reset");
+      // ≥15 s while still held → deep reset fires immediately so the
+      // user gets visual confirmation right at the threshold instead
+      // of having to release.
+      Serial.println("[BOOT] >15s held, triggering deep factory reset");
       ledWrite(true);
       delay(150);
-      doFactoryReset();
+      doDeepFactoryReset();
     }
   }
 }
 
 void checkBootTimeFactoryReset() {
   if (digitalRead(PIN_BOOT) == LOW) {
-    Serial.println("BOOT held at startup. Hold for 5s to factory reset…");
+    Serial.println("BOOT held at startup. Hold 5s+ for factory reset, 15s+ for deep reset…");
     bootPressed = true;
     bootPressStart = millis();
     while (digitalRead(PIN_BOOT) == LOW) {
