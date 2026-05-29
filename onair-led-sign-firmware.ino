@@ -43,9 +43,12 @@ REQUIRED LIBRARIES (as you installed)
 #define ENABLE_BLE_PROV 0
 
 // ---------- AWS IoT (compile-time) ----------
-// Set to 0 to leave the firmware identical to the pre-AWS build.
+// Default ON. The build system can override via -DENABLE_AWS_IOT=0 to
+// produce a local-only firmware. scripts/build.sh sets =1 explicitly.
+#ifndef ENABLE_AWS_IOT
 #define ENABLE_AWS_IOT 1
-#ifdef ENABLE_AWS_IOT
+#endif
+#if ENABLE_AWS_IOT
   #include "secrets.h"
   #include "aws_iot.h"
   // mbedTLS handshakes for AWS IoT need ~30 KB of stack; the default 8 KB
@@ -203,7 +206,7 @@ void setOutputMode(int mode) {
   } else if (outputMode == MODE_OFF) {
     outputWrite(false);
   }
-#ifdef ENABLE_AWS_IOT
+#if ENABLE_AWS_IOT
   awsIotPublishState(outputMode);
 #endif
 }
@@ -1069,7 +1072,7 @@ void startConnectedServices() {
   // Start server now that STA is connected
   server.begin();
 
-#ifdef ENABLE_AWS_IOT
+#if ENABLE_AWS_IOT
   awsIotSetup();
 #endif
 }
@@ -1601,7 +1604,7 @@ void loop() {
   // Onboard LED mirrors the output mode (off / on / breathing double-flash)
   statusLedTick();
 
-#ifdef ENABLE_AWS_IOT
+#if ENABLE_AWS_IOT
   awsIotLoop();
 #endif
 

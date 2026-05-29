@@ -7,12 +7,22 @@ certs/
 secrets.h
 src/secrets.h
 
+# Belt-and-suspenders: any PEM / key / cert that escapes certs/
+*.pem
+*.key
+*.crt
+
 # --- Local toolchain noise ------------------------------------------------
 .DS_Store
 *.swp
 *.swo
 
 # --- Arduino / ESP-IDF intermediate build outputs --------------------------
-# The top-level build/ contents *are* tracked today (release artifacts),
-# but the nested arduino-cli scratch dir is not useful in git history.
+# Binaries can embed compile-time secrets if anyone ever builds with a
+# populated secrets.h, so we keep them out of git entirely. Tagged
+# releases publish artifacts via GitHub Releases instead.
+build/*.bin
+build/*.elf
+build/*.map
+build/onair-led-sign-firmware.ino*
 build/onair-led-sign-firmware/
