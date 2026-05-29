@@ -59,12 +59,13 @@ if ! aws sts get-caller-identity --region "$AWS_REGION" >/dev/null 2>&1; then
   exit 4
 fi
 
-# Ensure the IoT policy exists; if not, refuse rather than silently create one
-# with too-broad permissions. The policy is intended to be created once per
-# account by the AWS admin (see PLAN.md §4).
+# Ensure the IoT policy exists; if not, refuse rather than silently create
+# one with too-broad permissions. The policy is intended to be created once
+# per account by the AWS admin — see docs/aws-iot-policies.md for the
+# OnAirSignPolicy JSON.
 if ! aws iot get-policy --policy-name "$POLICY_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
   echo "ERROR: IoT policy '$POLICY_NAME' does not exist in region '$AWS_REGION'." >&2
-  echo "       Create it once from the JSON in PLAN.md §4 before running this script." >&2
+  echo "       Create it once from the JSON in docs/aws-iot-policies.md before running this script." >&2
   exit 5
 fi
 
