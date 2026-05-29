@@ -796,24 +796,6 @@ String connectedPage() {
   body += "<p>Breathing: <code>/api/mode?mode=breathing&period_ms=3000&min_pct=5&max_pct=100</code></p>";
   body += "<p>API token: <code id='tok'>" + htmlEscape(token) + "</code> <button id='btnCopy' class='secondary' onclick='copyToken()'>Copy</button></p>";
   body += "</details>";
-
-  // Setup-AP credentials, for printing a sticker after the fact. The
-  // GET-STICKER Serial command is locked once the device joined STA, so
-  // this collapsible section is the only post-deployment way to scrape
-  // the password out without a factory reset.
-  {
-    String apPass = loadString("ap_pass", "");
-    if (apPass.length() > 0) {
-      String qrUrl = wifiQrQuickChartUrl(apSsid, apPass, 240);
-      body += "<details class='section'><summary class='hint'>Setup AP credentials (for sticker)</summary>";
-      body += "<p>SSID: <code>" + htmlEscape(apSsid) + "</code></p>";
-      body += "<p>Password: <code>" + htmlEscape(apPass) + "</code></p>";
-      body += "<p><img src='" + qrUrl + "' alt='Wi-Fi join QR' style='max-width:240px;border-radius:8px'/></p>";
-      body += "<p class='hint'>Phone-camera scan auto-joins the setup AP. Print this block as a sticker for hands-free re-onboarding.</p>";
-      body += "</details>";
-    }
-  }
-
   body += "<p class='hint' id='msg'></p>";
 
   String script;
