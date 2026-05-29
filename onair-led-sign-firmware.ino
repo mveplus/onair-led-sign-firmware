@@ -49,10 +49,11 @@ REQUIRED LIBRARIES (as you installed)
 #define ENABLE_AWS_IOT 1
 #endif
 #if ENABLE_AWS_IOT
-  #include "secrets.h"
   #include "aws_iot.h"
   // mbedTLS handshakes for AWS IoT need ~30 KB of stack; the default 8 KB
-  // Arduino loop task overflows mid-handshake and reboots the chip.
+  // Arduino loop task overflows mid-handshake and reboots the chip. The
+  // bump is unconditional when the AWS module is compiled in — it stays
+  // active even when the device is unprovisioned and the MQTT path idle.
   SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 #endif
 
@@ -1516,6 +1517,82 @@ void setupHttpHandlers() {
       }
     }
   );
+
+#if ENABLE_AWS_IOT
+  // AWS IoT provisioning — accepts the per-device cert/key/endpoint and
+  // re-initializes the module. Body is JSON
+  //   {"endpoint":"...", "root_ca"?:"...", "thing_name"?:"...",
+  //    "cert":"...", "key":"..."}
+  // root_ca empty/absent → bundled Amazon Root CA1 used at runtime.
+  // thing_name empty/absent → "onair-<mac12>" default at runtime.
+  server.on("/api/aws/provision", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      if (!ensureApiAuth(request)) return;
+      String *body = reinterpret_cast<String*>(request->_tempObject);
+      if (index == 0) {
+        delete body;
+        body = new String();
+        body->reserve(total);
+        request->_tempObject = body;
+      }
+      if (!body) return;
+      body->concat((char*)data, len);
+      if (index + len != total) return;
+
+      // PEM cert + key + root_ca can together approach ~6 KB; size the
+      // doc generously to avoid silent parse failures.
+      DynamicJsonDocument doc(8192);
+      DeserializationError err = deserializeJson(doc, *body);
+      delete body;
+      request->_tempObject = nullptr;
+
+      DynamicJsonDocument resp(256);
+      if (err) {
+        resp["ok"] = false;
+        resp["error"] = "Bad JSON";
+      } else {
+        String endpoint  = doc["endpoint"]   | "";
+        String root_ca   = doc["root_ca"]    | "";
+        String thingName = doc["thing_name"] | doc["thing"] | "";
+        String cert      = doc["cert"]       | "";
+        String key       = doc["key"]        | "";
+        if (!awsIotProvision(endpoint, root_ca, thingName, cert, key)) {
+          resp["ok"] = false;
+          resp["error"] = "endpoint, cert, and key are required";
+        } else {
+          resp["ok"]       = true;
+          resp["thing"]    = awsIotThingName();
+          resp["endpoint"] = awsIotEndpoint();
+        }
+      }
+      String out;
+      serializeJson(resp, out);
+      request->send(200, "application/json", out);
+    });
+
+  // Status report — never echoes cert/key contents.
+  server.on("/api/aws/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!ensureApiAuth(request)) return;
+    DynamicJsonDocument doc(256);
+    doc["enabled"]     = true;
+    doc["provisioned"] = awsIotIsProvisioned();
+    doc["connected"]   = awsIotIsConnected();
+    doc["last_rc"]     = awsIotLastRc();
+    doc["thing"]       = awsIotThingName();
+    doc["endpoint"]    = awsIotEndpoint();
+    String out;
+    serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+
+  // Clear the "aws_iot" Preferences namespace and tear down the MQTT
+  // connection. Device stays online; only the AWS path is disabled.
+  server.on("/api/aws/forget", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!ensureApiAuth(request)) return;
+    awsIotForget();
+    request->send(200, "application/json", "{\"ok\":true}");
+  });
+#endif
 }
 
 // ---------------- Arduino setup/loop ----------------
