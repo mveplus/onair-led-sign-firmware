@@ -1069,26 +1069,57 @@ void scheduleReboot(uint32_t delayMs = 200) {
 
 void handleResetLongPress() {
   bool pressed = (digitalRead(PIN_BOOT) == LOW); // pull-up
+  // Release debounce: a single transient HIGH read during the hold (loop
+  // starvation, contact bounce, RF noise, etc.) used to wipe bootPressed
+  // and reset the timer, so the 5 s threshold was never actually reached
+  // even when the user was holding cleanly. Require sustained HIGH for
+  // RELEASE_DEBOUNCE_MS before declaring the button released.
+  static const uint32_t RELEASE_DEBOUNCE_MS = 60;
+  static uint32_t firstHighMs = 0;
+  static uint32_t lastHeldLog = 0;
+
   if (pressed && !bootPressed) {
     bootPressed = true;
     bootPressStart = millis();
     resetFeedbackActive = true;
     savedOutputMode = outputMode;
+    firstHighMs = 0;
+    lastHeldLog = 0;
+    Serial.println("[BOOT] press detected");
   }
   if (!pressed && bootPressed) {
+    if (firstHighMs == 0) firstHighMs = millis();
+    if (millis() - firstHighMs < RELEASE_DEBOUNCE_MS) {
+      return;  // wait to see if it stays HIGH
+    }
+    uint32_t held = millis() - bootPressStart;
     bootPressed = false;
+    firstHighMs = 0;
     ledWrite(false);
     if (resetFeedbackActive) {
       resetFeedbackActive = false;
       setOutputMode(savedOutputMode);
     }
+    Serial.print("[BOOT] released after ");
+    Serial.print(held);
+    Serial.println(" ms");
     return;
+  }
+  if (pressed) {
+    firstHighMs = 0;  // any solid LOW read clears the release debounce
   }
   if (bootPressed) {
     uint32_t held = millis() - bootPressStart;
+    if (millis() - lastHeldLog >= 1000) {
+      lastHeldLog = millis();
+      Serial.print("[BOOT] still held: ");
+      Serial.print(held);
+      Serial.println(" ms");
+    }
     if (held < RESET_HOLD_MS) {
       ledSlowBlinkTick();
     } else {
+      Serial.println("[BOOT] threshold reached, factory reset");
       ledWrite(true);
       delay(150);
       doFactoryReset();
