@@ -119,6 +119,12 @@ static AsyncWebServer server(80);
 
 // ---------------- Storage ----------------
 static Preferences prefs;
+// Separate "mfg" namespace for state that should survive a normal factory
+// reset: the setup-AP password and the GET-STICKER lockout flag. Wiping
+// these would silently invalidate any printed sticker QR. Use the
+// RESET-MFG Serial command (in handleSerialStickerCommand) to rotate
+// the AP password when you actually want a new sticker.
+static Preferences mfg;
 
 // ---------------- State ----------------
 static bool portalMode = false;
@@ -325,7 +331,8 @@ void saveConfig(const String& ssid, const String& pass, const String& host, int 
   prefs.putBool("ledah", ledah);
   prefs.putString("auth_user", authUser);
   prefs.putString("auth_pass", authPass);
-  prefs.putString("ap_pass", apPass);
+  // ap_pass lives in mfg so it survives factory reset (sticker stays valid).
+  mfg.putString("ap_pass", apPass);
 }
 
 void clearConfig() { prefs.clear(); }
@@ -428,19 +435,32 @@ void handleSerialStickerCommand() {
       String cmd = buffer;
       buffer = "";
       cmd.trim();
-      if (cmd != "GET-STICKER") continue;
-      bool locked = prefs.getBool("stk_lock", false);
-      StaticJsonDocument<256> doc;
-      doc["locked"] = locked;
-      if (!locked) {
-        doc["mac"]      = WiFi.macAddress();
-        doc["ssid"]     = apSsid;
-        doc["password"] = apPassStr;
+      if (cmd == "GET-STICKER") {
+        bool locked = mfg.getBool("stk_lock", false);
+        StaticJsonDocument<256> doc;
+        doc["locked"] = locked;
+        if (!locked) {
+          doc["mac"]      = WiFi.macAddress();
+          doc["ssid"]     = apSsid;
+          doc["password"] = apPassStr;
+        }
+        String out;
+        serializeJson(doc, out);
+        Serial.print("STICKER:");
+        Serial.println(out);
+      } else if (cmd == "RESET-MFG") {
+        // Rotate the sticker credentials. Wipes the "mfg" namespace
+        // (ap_pass + stk_lock) and reboots; user-config in "cfg" is
+        // untouched. Intentionally Serial-only: this path requires the
+        // physical USB cable that a bench operator already has plugged
+        // in when they're printing a new sticker. After the reboot,
+        // GET-STICKER is unlocked and reports the freshly generated
+        // password.
+        Serial.println("MFG-RESET: clearing mfg namespace and rebooting");
+        mfg.clear();
+        delay(200);
+        ESP.restart();
       }
-      String out;
-      serializeJson(doc, out);
-      Serial.print("STICKER:");
-      Serial.println(out);
     } else if (buffer.length() < 64) {
       buffer += c;
     }
@@ -606,7 +626,7 @@ String setupPage() {
   bool savedLedAH = loadBool("ledah", true);
   String savedAuthUser = loadAuthUser();
   String savedAuthPass = loadAuthPass();
-  String savedApPass = loadString("ap_pass", "");
+  String savedApPass = mfg.getString("ap_pass", "");
   int savedOutEff = savedUseBL ? PIN_LED : savedOut;
   const int commonPins[] = {18, 6, 7, 8, 9, 10};
   bool outIsCommon = false;
@@ -1212,8 +1232,10 @@ void startConnectedServices() {
 
   // Lock the GET-STICKER Serial command once the device has actually
   // joined a user network. A stolen, deployed device should not divulge
-  // its setup-AP password over USB; factory reset re-arms it.
-  prefs.putBool("stk_lock", true);
+  // its setup-AP password over USB. The lock lives in the "mfg"
+  // namespace alongside ap_pass, so a normal factory reset preserves
+  // it (sticker stays valid) — only RESET-MFG over Serial clears it.
+  mfg.putBool("stk_lock", true);
 
   // mDNS (also retried on WiFi events)
   startMdnsIfNeeded();
@@ -1831,6 +1853,7 @@ void setup() {
   pinMode(PIN_BOOT, INPUT_PULLUP);
 
   prefs.begin("cfg", false);
+  mfg.begin("mfg", false);
 
   // Load LED polarity early so reset feedback is correct
   LED_ACTIVE_HIGH = loadBool("ledah", true);
@@ -1838,11 +1861,21 @@ void setup() {
   // Build SSID and password for Setup AP
   // Use the device MAC to avoid collisions between multiple boards.
   apSsid = "C6-SETUP-" + makeMacHex12();
-  if (!prefs.isKey("ap_pass")) {
-    apPassStr = makeFriendlyApPassword();
-    prefs.putString("ap_pass", apPassStr);
+  // ap_pass now lives in the mfg namespace (survives factory reset). On
+  // first boot after this change, migrate any legacy value from cfg so
+  // existing deployed devices keep the password printed on their
+  // sticker; afterwards the cfg copy is removed.
+  if (!mfg.isKey("ap_pass")) {
+    String legacy = prefs.getString("ap_pass", "");
+    if (legacy.length() > 0) {
+      apPassStr = legacy;
+      prefs.remove("ap_pass");
+    } else {
+      apPassStr = makeFriendlyApPassword();
+    }
+    mfg.putString("ap_pass", apPassStr);
   } else {
-    apPassStr = loadString("ap_pass", "");
+    apPassStr = mfg.getString("ap_pass", "");
   }
 
   // Setup output pin default early
