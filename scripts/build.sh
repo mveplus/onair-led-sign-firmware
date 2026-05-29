@@ -14,6 +14,7 @@ SKETCH_DIR="$OUT_DIR/$SKETCH_NAME"
 
 mkdir -p "$SKETCH_DIR"
 cp -f "$SKETCH" "$SKETCH_DIR/$SKETCH_BASENAME"
+cp -f *.h *.cpp "$SKETCH_DIR/" 2>/dev/null || true
 
 GIT_SHA="${GIT_SHA:-$(git rev-parse --short HEAD 2>/dev/null || true)}"
 [ -z "$GIT_SHA" ] && GIT_SHA="nogit"
