@@ -77,13 +77,32 @@ jobs:
           ELF="build/onair-led-sign-firmware.ino.elf"
           test -f "$ELF" || { echo "missing $ELF" >&2; exit 1; }
 
-          # 1. No ATS endpoint baked in.
-          BAD_HOST="$(strings "$ELF" | grep -E 'amazonaws\.com' || true)"
-          # 2. No per-device private key.
-          BAD_KEY="$(strings "$ELF"  | grep -E 'BEGIN [A-Z ]*PRIVATE KEY' || true)"
-          # 3. Exactly one BEGIN CERTIFICATE block (the bundled Amazon Root
-          #    CA 1). More than one → a per-device cert leaked in.
-          CERT_COUNT="$(strings "$ELF" | grep -c -E 'BEGIN CERTIFICATE' || echo 0)"
+          # The strings dump from the linked ELF includes captive-portal HTML
+          # for the AWS provisioning forms, which carries placeholders like
+          #   placeholder='xxxx-ats.iot.&lt;region&gt;.amazonaws.com'
+          #   placeholder='-----BEGIN CERTIFICATE-----'
+          #   placeholder='-----BEGIN PRIVATE KEY-----'
+          # These trigger naive `amazonaws.com` / `BEGIN ... PRIVATE KEY` /
+          # `BEGIN CERTIFICATE` greps as false positives. Tighten the
+          # patterns to avoid the UI strings while still catching real
+          # leaks:
+          #
+          # 1. Endpoints: require the full <alnum>-ats.iot.<alnum-or-dash>+
+          #    .amazonaws.com pattern. The placeholder's `&lt;region&gt;`
+          #    section contains `&` and `;` which break this regex; a real
+          #    endpoint passes it.
+          # 2. PEM private keys: match on `END [...] PRIVATE KEY` rather
+          #    than `BEGIN [...] PRIVATE KEY`. The captive-portal
+          #    placeholder only ever carries the BEGIN marker, never an
+          #    END line, so this de-noises completely.
+          # 3. PEM certificates: count `END CERTIFICATE` instead of
+          #    `BEGIN CERTIFICATE`. Same logic — placeholders never carry
+          #    END markers. The bundled Amazon Root CA 1 contributes
+          #    exactly one END line; >1 means a real cert leaked in.
+
+          BAD_HOST="$(strings "$ELF" | grep -E '[a-z0-9]+-ats\.iot\.[a-z0-9-]+\.amazonaws\.com' || true)"
+          BAD_KEY="$(strings "$ELF"  | grep -E '\-\-\-\-\-END [A-Z ]*PRIVATE KEY\-\-\-\-\-' || true)"
+          CERT_COUNT="$(strings "$ELF" | grep -c -E '\-\-\-\-\-END CERTIFICATE\-\-\-\-\-' || echo 0)"
 
           fail=0
           if [ -n "$BAD_HOST" ]; then
@@ -91,11 +110,11 @@ jobs:
             fail=1
           fi
           if [ -n "$BAD_KEY" ]; then
-            echo "::error::private key in binary (masked)"
+            echo "::error::private key (END marker) in binary"
             fail=1
           fi
           if [ "$CERT_COUNT" -gt 1 ]; then
-            echo "::error::found $CERT_COUNT BEGIN CERTIFICATE blocks in binary; expected 1 (Amazon Root CA 1)"
+            echo "::error::found $CERT_COUNT END CERTIFICATE blocks in binary; expected 1 (Amazon Root CA 1)"
             fail=1
           fi
           if [ $fail -eq 0 ]; then
