@@ -483,6 +483,25 @@ void handleSerialStickerCommand() {
         serializeJson(doc, out);
         Serial.print("NET:");
         Serial.println(out);
+      } else if (cmd == "RESET-CFG") {
+        // Standard factory reset equivalent (same as a 5 s BOOT hold).
+        // Clears the "cfg" namespace (Wi-Fi creds, auth, AWS, output
+        // settings) and reboots. The "mfg" namespace is preserved, so
+        // the sticker password and stk_lock survive — your printed
+        // sticker stays valid.
+        Serial.println("RESET-CFG: clearing cfg namespace and rebooting");
+        prefs.clear();
+        delay(200);
+        ESP.restart();
+      } else if (cmd == "RESET-ALL") {
+        // Full wipe — clears both "cfg" and "mfg". Equivalent to the
+        // deep reset path. Rotates the AP password; any printed
+        // sticker becomes invalid.
+        Serial.println("RESET-ALL: clearing cfg + mfg namespaces and rebooting");
+        prefs.clear();
+        mfg.clear();
+        delay(200);
+        ESP.restart();
       }
     } else if (buffer.length() < 64) {
       buffer += c;
@@ -1629,8 +1648,30 @@ void setupHttpHandlers() {
   server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
     if (!ensureApiAuth(request)) return;
     request->send(200, "application/json", "{\"ok\":true,\"rebooting\":true}");
-    delay(200);
-    ESP.restart();
+    scheduleReboot(300);
+  });
+
+  // Factory reset over HTTP. Same effect as a 5 s BOOT hold; ?deep=1
+  // also wipes the "mfg" namespace (rotates the AP password and
+  // invalidates any printed sticker). Useful when the BOOT button is
+  // not reachable or behaving (loop starvation, hardware fault, etc.).
+  server.on("/api/factory-reset", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!ensureApiAuth(request)) return;
+    bool deep = false;
+    if (request->hasParam("deep")) {
+      String v = request->getParam("deep")->value();
+      deep = (v == "1" || v == "true");
+    }
+    DynamicJsonDocument resp(128);
+    resp["ok"] = true;
+    resp["deep"] = deep;
+    resp["rebooting"] = true;
+    String out;
+    serializeJson(resp, out);
+    request->send(200, "application/json", out);
+    prefs.clear();
+    if (deep) mfg.clear();
+    scheduleReboot(400);
   });
 
   // -------- OTA (/update) --------
