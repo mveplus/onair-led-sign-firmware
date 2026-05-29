@@ -13,5 +13,6 @@ docker run --rm \
   -e OUT_DIR \
   -e GIT_SHA \
   -e BUILD_DATE \
+  -e ENABLE_AWS_IOT \
   "$IMAGE" \
   bash /workspace/scripts/build.sh
