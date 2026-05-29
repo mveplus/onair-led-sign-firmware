@@ -1,9 +1,8 @@
 # AWS IoT Provisioning & Onboarding Plan
 
-Supersedes the earlier `PLAN.md`, which assumed compile-time `secrets.h` and
-tracked-binary releases. The new direction: zero AWS credentials in the
-source tree or in any published binary, with provisioning happening at
-runtime in three optional paths.
+The authoritative plan for AWS IoT integration in this firmware. Zero AWS
+credentials in the source tree or in any published binary; provisioning
+happens at runtime via three optional paths.
 
 ## Goals
 
