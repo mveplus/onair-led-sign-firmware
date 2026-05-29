@@ -55,7 +55,8 @@ jobs:
           # ENABLE_AWS_IOT defaults to 1 in scripts/build.sh; pinned here for
           # clarity. The runtime-loaded credentials flow means the binary
           # still has no AWS material baked in.
-          ENABLE_AWS_IOT: "1"
+          #ENABLE_AWS_IOT: "1" < this owerrides GitHub action vars if set.
+          ENABLE_AWS_IOT: ${{ vars.ENABLE_AWS_IOT || '1' }}
         run: |
           chmod +x scripts/docker-build.sh scripts/build.sh
           ./scripts/docker-build.sh
