@@ -7,9 +7,12 @@ Workflow:
      GET-STICKER, parses the JSON response, and writes a PNG containing
      a WIFI:T:WPA;S:...;P:...;; QR code that a phone camera auto-joins.
 
-The on-device command is locked after the first successful STA join, so
-this is a one-time bench step per device. Factory reset (5s BOOT hold)
-regenerates the AP password and re-arms the command.
+The on-device GET-STICKER command is locked once the device has joined
+its first STA network. A normal 5 s BOOT factory reset does NOT clear
+that lock by design — sticker stays valid across reset. To rotate the
+AP password and re-print a sticker, run with --reset: that sends
+RESET-MFG over Serial, the device wipes its "mfg" NVS namespace
+(ap_pass + stk_lock) and reboots with a fresh password.
 
 Requires: pyserial, qrcode[pil].
 """
@@ -60,6 +63,32 @@ def request_sticker(port: str, baud: int) -> dict:
         )
 
 
+def request_reset_mfg(port: str, baud: int, settle_secs: float = 6.0) -> None:
+    """Send RESET-MFG. The device wipes the "mfg" NVS namespace (ap_pass +
+    stk_lock) and reboots; the USB-CDC drops and re-enumerates during the
+    restart, so callers should retry their next read for a few seconds.
+    """
+    with serial.Serial(port, baud, timeout=0.5) as ser:
+        time.sleep(0.3)
+        ser.reset_input_buffer()
+        ser.write(b"RESET-MFG\n")
+        ser.flush()
+        deadline = time.time() + 2.0
+        ack = False
+        while time.time() < deadline:
+            line = ser.readline().decode(errors="replace").strip()
+            if line and "MFG-RESET" in line:
+                ack = True
+                break
+    if not ack:
+        raise RuntimeError(
+            "device did not acknowledge RESET-MFG within 2 s "
+            "(is this the right firmware build?)"
+        )
+    # Give the chip time to reboot and re-enumerate USB-CDC.
+    time.sleep(settle_secs)
+
+
 def make_wifi_uri(ssid: str, password: str) -> str:
     # Wi-Fi join URI per the de-facto standard used by phone cameras.
     # Escape backslash, semicolon, comma, colon, and quote with a backslash.
@@ -97,18 +126,56 @@ def main() -> int:
         "--out", default=None,
         help="Output PNG path (default: sticker-<MAC>.png)",
     )
+    ap.add_argument(
+        "--reset", action="store_true",
+        help=(
+            "Send RESET-MFG before reading. Rotates the AP password and "
+            "unlocks the GET-STICKER response. Use when the device "
+            "reports stk_lock=true and you need a new sticker. NOTE: any "
+            "previously printed sticker becomes invalid."
+        ),
+    )
     args = ap.parse_args()
 
-    try:
-        info = request_sticker(args.port, args.baud)
-    except (OSError, TimeoutError, RuntimeError) as e:
-        print(f"error: {e}", file=sys.stderr)
+    if args.reset:
+        print(
+            f"sending RESET-MFG to {args.port} (device will reboot)…",
+            file=sys.stderr,
+        )
+        try:
+            request_reset_mfg(args.port, args.baud)
+        except (OSError, TimeoutError, RuntimeError) as e:
+            print(f"error during RESET-MFG: {e}", file=sys.stderr)
+            return 1
+        print(
+            "device rebooted; reading fresh sticker info "
+            "(have to be quick — STA join re-engages the lock)…",
+            file=sys.stderr,
+        )
+
+    # After a reset the USB-CDC takes a few seconds to re-enumerate; retry
+    # the open a handful of times before giving up.
+    attempts = 8 if args.reset else 1
+    info = None
+    last_err: Exception | None = None
+    for i in range(attempts):
+        try:
+            info = request_sticker(args.port, args.baud)
+            break
+        except (OSError, TimeoutError, RuntimeError) as e:
+            last_err = e
+            if i < attempts - 1:
+                time.sleep(1)
+    if info is None:
+        print(f"error: {last_err}", file=sys.stderr)
         return 1
 
     if info.get("locked"):
         print(
-            "device reports stk_lock=true — the AP password is hidden "
-            "until factory reset (5s BOOT hold).",
+            "device reports stk_lock=true — first STA join already "
+            "happened. Re-run with --reset to rotate the AP password "
+            "and unlock the read.\n"
+            "(--reset invalidates any previously printed sticker.)",
             file=sys.stderr,
         )
         return 2
