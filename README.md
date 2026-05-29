@@ -277,6 +277,54 @@ Override the board(s) if needed (comma-separated FQBNs):
 FQBN=esp32:esp32:dfrobot_beetle_esp32c6,esp32:esp32:XIAO_ESP32C6 ./scripts/docker-build.sh
 ```
 
+## AWS IoT Core (optional)
+
+The firmware can keep an MQTT/TLS connection to AWS IoT Core in parallel with
+the existing HTTP API and captive portal. It is compile‑time gated on
+`ENABLE_AWS_IOT` (defined in the sketch, default `1`).
+
+### Per‑device credentials (`secrets.h`)
+
+`secrets.h` is **gitignored** and must be created at the sketch root. It holds
+the AWS account endpoint plus the three PEM blobs from AWS IoT (root CA,
+device certificate, device private key) as raw‑string `static const char`
+arrays:
+
+```c
+#define AWS_IOT_ENDPOINT     "xxxxxxxxxxxx-ats.iot.<region>.amazonaws.com"
+#define AWS_IOT_PORT         8883
+#define AWS_IOT_THING_NAME   "onair-<name>"
+
+static const char AWS_IOT_ROOT_CA[]     PROGMEM = R"EOF( ... )EOF";
+static const char AWS_IOT_CLIENT_CERT[] PROGMEM = R"EOF( ... )EOF";
+static const char AWS_IOT_CLIENT_KEY[]  PROGMEM = R"EOF( ... )EOF";
+```
+
+The corresponding PEM files for the first device live under `certs/` (also
+gitignored). Paste them into the raw string literals above.
+
+Required library: **PubSubClient** by Nick O'Leary (install via the Arduino
+Library Manager).
+
+### Topics
+
+| Topic | Direction | Payload |
+| --- | --- | --- |
+| `onair/<thing>/state` | device → cloud | `{"mode":0\|1\|2,"thing":"...","uptime_ms":...,"rssi":...}` published on every `setOutputMode()` and on every (re)connect |
+| `onair/<thing>/cmd`   | cloud → device | `{"mode":0\|1\|2}` — applied via `setOutputMode()` |
+
+### Verifying from the AWS console
+
+1. Open **AWS IoT → Test → MQTT test client**.
+2. Subscribe to `onair/#`.
+3. Power the device — you should see a `state` message a few seconds after
+   it joins Wi‑Fi.
+4. Publish to `onair/<thing>/cmd` with `{"mode":1}` to turn the output on
+   (or `0` / `2`). A fresh `state` message is published in response.
+
+To disable the integration entirely, set `#define ENABLE_AWS_IOT 0` near the
+top of the sketch — the rest of the firmware is unchanged.
+
 ## Optional BLE Provisioning
 
 BLE provisioning is compile‑time gated:
