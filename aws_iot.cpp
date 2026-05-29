@@ -280,6 +280,11 @@ int  awsIotLastRc()        { return g_lastRc; }
 String awsIotThingName()   { return g_thingName; }
 String awsIotEndpoint()    { return g_endpoint; }
 
+// kAmazonRootCa1 lives in the anonymous namespace above; this accessor
+// has external linkage so aws_provisioning.cpp (and any future TU that
+// needs the bundled CA) can reach it without re-embedding the string.
+const char* awsIotBundledRootCa1() { return kAmazonRootCa1; }
+
 #else  // !ENABLE_AWS_IOT — empty stubs so the linker is happy.
 
 void   awsIotSetup() {}
@@ -295,5 +300,6 @@ bool   awsIotIsConnected()   { return false; }
 int    awsIotLastRc()        { return 0; }
 String awsIotThingName()     { return String(); }
 String awsIotEndpoint()      { return String(); }
+const char* awsIotBundledRootCa1() { return ""; }
 
 #endif  // ENABLE_AWS_IOT

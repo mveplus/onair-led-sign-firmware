@@ -53,3 +53,7 @@ bool   awsIotIsConnected();
 int    awsIotLastRc();          // last PubSubClient state(); 0 = never tried
 String awsIotThingName();       // empty when unprovisioned
 String awsIotEndpoint();        // empty when unprovisioned
+
+// Pointer to the bundled Amazon Root CA 1 PEM, used by
+// aws_provisioning.cpp as the default trust anchor for the claim flow.
+const char* awsIotBundledRootCa1();
