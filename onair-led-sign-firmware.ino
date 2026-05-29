@@ -1651,10 +1651,28 @@ void setupHttpHandlers() {
       } else {
         String body;
         if (ok) {
-          body += "<p>Update complete. Rebooting…</p>";
-          body += "<p class='hint'>You will be redirected to the main page.</p>";
-          body += "<div class='btns'><button onclick=\"location.href='/'\">Go to Home</button></div>";
-          body += "<script>setTimeout(()=>{location.href='/'},8000);</script>";
+          body += "<p id='otaStatus'>Update complete. Rebooting…</p>";
+          body += "<p class='hint'>This page will redirect once the device is back online (~10-15 s).</p>";
+          body += "<div class='btns'><button onclick=\"location.href='/'\">Open home now</button></div>";
+          // Wait ~5s for the device to actually reboot before we start
+          // polling — otherwise the first poll can succeed against the
+          // old firmware still running through its ESP.restart() delay,
+          // and the redirect lands while the device is mid-reboot.
+          body += "<script>"
+                  "(async()=>{"
+                  "  const s=document.getElementById('otaStatus');"
+                  "  await new Promise(r=>setTimeout(r,5000));"
+                  "  s.textContent='Waiting for device to come back\\u2026';"
+                  "  for(let i=0;i<60;i++){"
+                  "    try{"
+                  "      const r=await fetch('/api/status',{cache:'no-store'});"
+                  "      if(r.ok){s.textContent='Online. Redirecting\\u2026'; await new Promise(r=>setTimeout(r,500)); location.href='/'; return;}"
+                  "    }catch(e){}"
+                  "    await new Promise(r=>setTimeout(r,1000));"
+                  "  }"
+                  "  s.textContent='Device did not come back within 65 s. Reload this page or check the device.';"
+                  "})();"
+                  "</script>";
         } else {
           body += "<p class='bad'>Update failed.</p>";
           body += "<div class='btns'><button onclick=\"location.href='/update'\">Try Again</button></div>";
