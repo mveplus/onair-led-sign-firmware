@@ -715,6 +715,23 @@ String connectedPage() {
   body += "</div>";
   body += "<div class='btns'><button id='btnBreathApply' class='secondary' onclick='setBreathing()'>Apply breathing settings</button></div>";
   body += "</details>";
+#if ENABLE_AWS_IOT
+  body += "<details class='section'><summary class='hint'>AWS IoT</summary>";
+  body += "<p>Status: <code id='awsStatus'>loading…</code></p>";
+  body += "<div><label>Endpoint</label><input id='awsEndpoint' placeholder='xxxx-ats.iot.&lt;region&gt;.amazonaws.com' autocomplete='off'/></div>";
+  body += "<div><label>Thing name (optional)</label><input id='awsThing' placeholder='onair-&lt;mac12&gt;' autocomplete='off'/></div>";
+  body += "<details><summary class='hint'>Override Root CA (optional — bundled Amazon Root CA 1 is used by default)</summary>";
+  body += "<textarea id='awsCa' rows='6' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea>";
+  body += "</details>";
+  body += "<div><label>Client certificate (PEM)</label><textarea id='awsCert' rows='8' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "<div><label>Client private key (PEM)</label><textarea id='awsKey' rows='8' placeholder='-----BEGIN PRIVATE KEY-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "<div class='btns'>";
+  body += "<button id='btnAwsSave' class='secondary' onclick='awsSave()'>Save</button>";
+  body += "<button id='btnAwsForget' class='secondary' onclick='awsForget()'>Forget</button>";
+  body += "</div>";
+  body += "<p class='hint'>Cert and key are POSTed to <code>/api/aws/provision</code> and stored in NVS. They are never echoed back by the device.</p>";
+  body += "</details>";
+#endif
   body += "<details class='section'><summary class='hint'>API access</summary>";
   body += "<p>API: <code>/api/status</code>, <code>/api/set?state=1</code>, <code>/api/config</code>, <code>/api/reboot</code> • OTA: <code>/update</code></p>";
   body += "<p>Breathing: <code>/api/mode?mode=breathing&period_ms=3000&min_pct=5&max_pct=100</code></p>";
@@ -805,6 +822,50 @@ String connectedPage() {
             "  setBusyBtn('btnBreathApply', false);"
             "}"
             "function openOta(){const b=document.getElementById('btnOta'); if(b) b.classList.add('active'); setBusyBtn('btnOta', true); setMsg('Opening OTA…'); window.location.href='/update';}"
+#if ENABLE_AWS_IOT
+            "async function awsRefreshStatus(){"
+            "  const s=document.getElementById('awsStatus'); if(!s) return;"
+            "  try{"
+            "    const r=await fetchWithTimeout('/api/aws/status', {}, 2000);"
+            "    const j=await r.json();"
+            "    if(!j.provisioned){s.textContent='not provisioned';}"
+            "    else if(j.connected){s.textContent='connected ('+j.thing+' @ '+j.endpoint+')';}"
+            "    else{s.textContent='provisioned but disconnected (rc='+j.last_rc+')';}"
+            "  }catch(e){s.textContent='status error';}"
+            "}"
+            "async function awsSave(){"
+            "  const endpoint=document.getElementById('awsEndpoint').value.trim();"
+            "  const thing=document.getElementById('awsThing').value.trim();"
+            "  const root_ca=document.getElementById('awsCa').value;"
+            "  const cert=document.getElementById('awsCert').value;"
+            "  const key=document.getElementById('awsKey').value;"
+            "  if(!endpoint||!cert||!key){setMsg('Endpoint, cert and key are required', true); return;}"
+            "  setMsg('Saving AWS IoT credentials…');"
+            "  setBusyBtn('btnAwsSave', true);"
+            "  try{"
+            "    const r=await fetchWithTimeout('/api/aws/provision', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({endpoint, thing_name:thing, root_ca, cert, key})}, 8000);"
+            "    const j=await r.json();"
+            "    if(j.ok){"
+            "      setMsg('Saved. Thing='+j.thing);"
+            "      document.getElementById('awsCert').value='';"
+            "      document.getElementById('awsKey').value='';"
+            "      setTimeout(awsRefreshStatus, 1500);"
+            "    } else { setMsg(j.error||'Save failed', true); }"
+            "  }catch(e){ setMsg('Save failed (device busy or rebooting)', true); }"
+            "  setBusyBtn('btnAwsSave', false);"
+            "}"
+            "async function awsForget(){"
+            "  if(!confirm('Forget AWS IoT credentials?')) return;"
+            "  setMsg('Forgetting AWS IoT credentials…');"
+            "  setBusyBtn('btnAwsForget', true);"
+            "  try{"
+            "    const r=await fetchWithTimeout('/api/aws/forget', {method:'POST'}, 4000);"
+            "    const j=await r.json();"
+            "    if(j.ok){ setMsg('AWS IoT credentials cleared.'); awsRefreshStatus(); }"
+            "  }catch(e){ setMsg('Forget failed', true); }"
+            "  setBusyBtn('btnAwsForget', false);"
+            "}"
+#endif
             "async function initStateFromDevice(){"
             "  try{"
             "    const r=await fetchWithTimeout('/api/status', {}, 1600);"
@@ -823,6 +884,9 @@ String connectedPage() {
             "    if(!ok && tries<6){setTimeout(tick, 2000);} else if(ok){setMsg('');}"
             "  };"
             "  tick();"
+#if ENABLE_AWS_IOT
+            "  awsRefreshStatus();"
+#endif
             "});";
   return pageShell("", body, script);
 }
