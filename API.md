@@ -49,6 +49,26 @@ GET /api/mode?mode=off|on|breathing[&period_ms=500..10000][&min_pct=1..99][&max_
   - `400` if `period_ms`, `min_pct`, or `max_pct` are out of range.
   - `400` if `max_pct` is not greater than `min_pct`.
 
+POST /api/pin?out=0..48
+POST /api/pin?usebl=1
+- Changes the output GPIO at runtime without re-running setup.
+- `out` selects a raw GPIO (e.g. `18` = XIAO D10, the default sign pin).
+- `usebl=1` uses the onboard LED as the output instead of an external pin.
+- Persists to NVS and reboots; WiFi credentials are kept so the device
+  reconnects on its own.
+- Response fields: `ok`, `out_pin`, `usebl`, `rebooting`.
+- Errors:
+  - `400` if neither a valid `out` (0..48) nor `usebl=1` is provided.
+
+POST /api/led?ledah=0|1
+- Sets the onboard LED active level. `1` = active HIGH (ON drives the pin
+  HIGH), `0` = active LOW (ON drives the pin LOW). Use `0` for boards whose
+  onboard LED lights when the GPIO is LOW (e.g. XIAO ESP32-C6, GPIO15).
+- Applies live (no reboot) and persists to NVS.
+- Response fields: `ok`, `led_active_high`.
+- Errors:
+  - `400` if `ledah` is missing.
+
 GET /api/config
 - Returns stored configuration.
 - Response fields:
