@@ -1004,10 +1004,25 @@ void doFactoryReset() {
   ESP.restart();
 }
 
+// Async deferred reboot. HTTP handlers set rebootPending so they can
+// send their response (including a 303 redirect that the browser still
+// needs to follow) before the chip actually restarts. loop() does the
+// restart once the deadline passes.
+static bool     rebootPending = false;
+static uint32_t rebootAt      = 0;
+
 void scheduleReboot(uint32_t delayMs = 200) {
-  Serial.println("Reboot requested.");
-  delay(delayMs);
-  ESP.restart();
+  Serial.print("Reboot scheduled in ");
+  Serial.print(delayMs);
+  Serial.println(" ms.");
+  uint32_t newAt = millis() + delayMs;
+  // Multiple callers within the same handler chain take the earliest
+  // deadline so we don't unintentionally extend an already-scheduled
+  // restart.
+  if (!rebootPending || (int32_t)(newAt - rebootAt) < 0) {
+    rebootAt = newAt;
+  }
+  rebootPending = true;
 }
 
 void handleResetLongPress() {
@@ -1624,6 +1639,42 @@ void setupHttpHandlers() {
     request->send(resp);
   });
 
+  // Post-OTA waiting page — reached via the 303 redirect from POST
+  // /update. Plain GET so browser BACK / refresh / sharing the URL is
+  // safe (no form resubmission warning). The page polls /api/status
+  // and redirects to '/' once the device comes back from the restart.
+  server.on("/update/done", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!ensureApiAuth(request)) return;
+    String body;
+    body += "<p id='otaStatus'>Update complete. Rebooting…</p>";
+    body += "<p class='hint'>This page will redirect once the device is back online (~10-15 s).</p>";
+    body += "<div class='btns'><button onclick=\"location.href='/'\">Open home now</button></div>";
+    // 5 s pre-poll wait so we don't catch the device still draining its
+    // scheduled-restart window and report "online" against the old
+    // firmware right before it reboots.
+    body += "<script>"
+            "(async()=>{"
+            "  const s=document.getElementById('otaStatus');"
+            "  await new Promise(r=>setTimeout(r,5000));"
+            "  s.textContent='Waiting for device to come back\\u2026';"
+            "  for(let i=0;i<60;i++){"
+            "    try{"
+            "      const r=await fetch('/api/status',{cache:'no-store'});"
+            "      if(r.ok){s.textContent='Online. Redirecting\\u2026'; await new Promise(r=>setTimeout(r,500)); location.href='/'; return;}"
+            "    }catch(e){}"
+            "    await new Promise(r=>setTimeout(r,1000));"
+            "  }"
+            "  s.textContent='Device did not come back within 65 s. Reload this page or check the device.';"
+            "})();"
+            "</script>";
+    AsyncWebServerResponse *resp = request->beginResponse(
+      200, "text/html", pageShell("OTA Update", body, "", true)
+    );
+    resp->addHeader("Connection", "close");
+    resp->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    request->send(resp);
+  });
+
   server.on(
     "/update",
     HTTP_POST,
@@ -1642,50 +1693,45 @@ void setupHttpHandlers() {
       }
       if (wantsJson) {
         AsyncWebServerResponse *resp = request->beginResponse(
-          200, "application/json",
+          ok ? 200 : 500, "application/json",
           ok ? "{\"ok\":true,\"rebooting\":true}" : "{\"ok\":false,\"error\":\"Update failed\"}"
         );
         resp->addHeader("Connection", "close");
         resp->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
         request->send(resp);
+        if (ok) scheduleReboot(1500);
+        return;
+      }
+
+      if (ok) {
+        // POST / Redirect / GET: 303 to a plain GET URL so the browser's
+        // BACK button or refresh on the post-OTA page doesn't try to
+        // re-POST the multipart upload (ERR_CACHE_MISS / "Confirm form
+        // resubmission"). The actual "device is rebooting, please wait"
+        // page is rendered by the GET /update/done handler.
+        AsyncWebServerResponse *resp = request->beginResponse(303);
+        resp->addHeader("Location", "/update/done");
+        resp->addHeader("Connection", "close");
+        resp->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        request->send(resp);
+        // 3.5 s: enough for the 303 to land, the browser to follow it,
+        // and the device to serve /update/done. After that the loop()
+        // tick calls ESP.restart().
+        scheduleReboot(3500);
       } else {
         String body;
-        if (ok) {
-          body += "<p id='otaStatus'>Update complete. Rebooting…</p>";
-          body += "<p class='hint'>This page will redirect once the device is back online (~10-15 s).</p>";
-          body += "<div class='btns'><button onclick=\"location.href='/'\">Open home now</button></div>";
-          // Wait ~5s for the device to actually reboot before we start
-          // polling — otherwise the first poll can succeed against the
-          // old firmware still running through its ESP.restart() delay,
-          // and the redirect lands while the device is mid-reboot.
-          body += "<script>"
-                  "(async()=>{"
-                  "  const s=document.getElementById('otaStatus');"
-                  "  await new Promise(r=>setTimeout(r,5000));"
-                  "  s.textContent='Waiting for device to come back\\u2026';"
-                  "  for(let i=0;i<60;i++){"
-                  "    try{"
-                  "      const r=await fetch('/api/status',{cache:'no-store'});"
-                  "      if(r.ok){s.textContent='Online. Redirecting\\u2026'; await new Promise(r=>setTimeout(r,500)); location.href='/'; return;}"
-                  "    }catch(e){}"
-                  "    await new Promise(r=>setTimeout(r,1000));"
-                  "  }"
-                  "  s.textContent='Device did not come back within 65 s. Reload this page or check the device.';"
-                  "})();"
-                  "</script>";
-        } else {
-          body += "<p class='bad'>Update failed.</p>";
-          body += "<div class='btns'><button onclick=\"location.href='/update'\">Try Again</button></div>";
-        }
+        body += "<p class='bad'>Update failed.</p>";
+        body += "<div class='btns'><button onclick=\"location.href='/update'\">Try Again</button></div>";
         AsyncWebServerResponse *resp = request->beginResponse(
           200, "text/html", pageShell("OTA Update", body, "", true)
         );
         resp->addHeader("Connection", "close");
         resp->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
         request->send(resp);
+        // No restart on failure — the running firmware is unchanged
+        // (atomic OTA on ESP32), so leave the device up so the user can
+        // retry immediately without waiting through a full boot.
       }
-      delay(1200);
-      ESP.restart();
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
       if (!ensureApiAuth(request)) return;
@@ -1924,6 +1970,13 @@ void setup() {
 }
 
 void loop() {
+  // Async deferred reboot — fires once the deadline scheduled by
+  // scheduleReboot() passes, after async HTTP responses have flushed.
+  if (rebootPending && (int32_t)(millis() - rebootAt) >= 0) {
+    Serial.println("Reboot due. Restarting.");
+    ESP.restart();
+  }
+
   // Read Serial for the GET-STICKER provisioning-bench command.
   handleSerialStickerCommand();
 
