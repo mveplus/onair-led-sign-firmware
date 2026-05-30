@@ -82,8 +82,12 @@ ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
 
 # ---- Lambda zip ----------------------------------------------------------
 LAMBDA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ZIP_FILE="$(mktemp -t onair-lambda.XXXX.zip)"
-trap 'rm -f "$ZIP_FILE"' EXIT
+# mktemp -t with a .zip suffix creates an empty 0-byte file, and `zip`
+# then refuses to "update" the empty non-archive. Use a temp dir and put
+# the archive inside it instead.
+ZIP_DIR="$(mktemp -d -t onair-lambda.XXXXXX)"
+ZIP_FILE="$ZIP_DIR/lambda.zip"
+trap 'rm -rf "$ZIP_DIR"' EXIT
 ( cd "$LAMBDA_DIR" && zip -q "$ZIP_FILE" lambda_function.py )
 
 # Lambda's reserved env list does NOT permit AWS_REGION explicitly; the
