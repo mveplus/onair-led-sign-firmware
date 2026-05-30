@@ -35,17 +35,29 @@ def lambda_handler(event, _context):
     if headers.get("authorization") != f"Bearer {SHARED_TOKEN}":
         return _resp(401, {"error": "unauthorized"})
 
+    # Accept input from either a JSON body or query-string parameters so
+    # both the canonical extension wrapper (POST + JSON body) and
+    # generic HTTP-hook configurations (URLs like ?thing=…&mode=1, no
+    # body templating needed) work the same way.
     try:
         body = json.loads(event.get("body") or "{}")
     except json.JSONDecodeError:
-        return _resp(400, {"error": "invalid JSON"})
+        body = {}
+    query = event.get("queryStringParameters") or {}
 
-    thing = body.get("thing")
-    mode = body.get("mode")
+    thing = body.get("thing") or query.get("thing")
+    mode_raw = body["mode"] if "mode" in body else query.get("mode")
+
     if not thing:
-        return _resp(400, {"error": "missing 'thing'"})
+        return _resp(400, {"error": "missing 'thing' (body or ?thing=…)"})
     if THING_ALLOWLIST and thing not in THING_ALLOWLIST:
         return _resp(403, {"error": f"thing '{thing}' not in ALLOWED_THINGS"})
+    if mode_raw is None:
+        return _resp(400, {"error": "missing 'mode' (body or ?mode=0|1|2)"})
+    try:
+        mode = int(mode_raw)
+    except (TypeError, ValueError):
+        return _resp(400, {"error": "mode must be 0 (off), 1 (on), or 2 (breathing)"})
     if mode not in (0, 1, 2):
         return _resp(400, {"error": "mode must be 0 (off), 1 (on), or 2 (breathing)"})
 
