@@ -26,3 +26,6 @@ build/*.elf
 build/*.map
 build/onair-led-sign-firmware.ino*
 build/onair-led-sign-firmware/
+
+# Cloud bridge bearer token (Lambda + API Gateway shared secret)
+.onair-bridge-token
