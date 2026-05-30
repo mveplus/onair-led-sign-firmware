@@ -1546,19 +1546,37 @@ void setupHttpHandlers() {
   server.on("/api/set", HTTP_GET, [](AsyncWebServerRequest *request) {
     if (!ensureApiAuth(request)) return;
     DynamicJsonDocument doc(256);
+    int httpStatus = 200;
     if (!request->hasParam("state")) {
       doc["ok"] = false;
-      doc["error"] = "Missing state=0|1";
+      doc["error"] = "Missing state=0|1|2 (off / on / breathing)";
+      httpStatus = 400;
     } else {
       int state = request->getParam("state")->value().toInt();
-      setOutputMode(state != 0 ? MODE_ON : MODE_OFF);
-      prefs.putInt("mode", outputMode);
-      doc["ok"] = true;
-      doc["state"] = (state != 0);
+      // 0 = off, 1 = on, 2 = breathing. Reject anything else so a typo
+      // doesn't silently flip the sign on — the previous behaviour was
+      // `state != 0 ? MODE_ON : MODE_OFF`, which mapped state=3 (and
+      // every other non-zero value) to MODE_ON.
+      if (state != MODE_OFF && state != MODE_ON && state != MODE_BREATHING) {
+        doc["ok"] = false;
+        doc["error"] = "Invalid state — must be 0 (off), 1 (on), or 2 (breathing)";
+        httpStatus = 400;
+      } else {
+        setOutputMode(state);
+        prefs.putInt("mode", outputMode);
+        doc["ok"] = true;
+        // Keep the legacy `state` bool for callers that only know on/off
+        // (true whenever the output is anything other than OFF), and add
+        // an explicit `output_mode` string so new callers don't have to
+        // map 0|1|2 themselves.
+        doc["state"] = (state != MODE_OFF);
+        doc["output_mode"] = state == MODE_BREATHING ? "breathing"
+                            : state == MODE_ON ? "on" : "off";
+      }
     }
     String out;
     serializeJson(doc, out);
-    request->send(200, "application/json", out);
+    request->send(httpStatus, "application/json", out);
   });
 
   server.on("/api/mode", HTTP_GET, [](AsyncWebServerRequest *request) {
