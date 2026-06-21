@@ -154,6 +154,18 @@ static int lastScanCount = -2; // -2 means "never started"
 static uint32_t lastScanStartedMs = 0;
 static const uint32_t SCAN_MAX_WAIT_MS = 6000;
 
+// ---------------- WiFi reconnect supervisor (STA mode only) ----------------
+// The ESP32 core's internal auto-reconnect gives up under common real-world
+// disconnect reasons (router reboot/NO_AP_FOUND, auth/DHCP timeout, band
+// steering), after which nothing re-arms the supplicant and the device sits
+// offline until power-cycled. The supervisor below actively re-issues
+// WiFi.begin() on a fixed cadence and, as a last resort, reboots if the link
+// stays down too long. All of it is gated on !portalMode so it never touches
+// the AP/captive-portal path.
+static uint32_t wifiDisconnectedSinceMs = 0;   // 0 = currently connected / never dropped
+static const uint32_t WIFI_RECONNECT_INTERVAL_MS = 10000;          // re-issue begin() every 10s
+static const uint32_t WIFI_OFFLINE_REBOOT_MS     = 15UL * 60UL * 1000UL; // reboot after 15 min offline
+
 // ---------------- Delayed reboot ----------------
 
 // ---------------- Helpers ----------------
@@ -1219,13 +1231,67 @@ void startMdnsIfNeeded() {
 void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
   switch (event) {
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      wifiDisconnectedSinceMs = 0;   // link is healthy again; clears the offline timer
       startMdnsIfNeeded();
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      // Record when the link first went down so the supervisor can escalate
+      // to a reboot if it never comes back. Only stamp the first drop in a
+      // run so repeated DISCONNECTED events don't keep pushing the deadline
+      // out. millis() can be 0 at the very first tick — bias to 1 so the
+      // "0 = connected" sentinel stays unambiguous.
+      if (wifiDisconnectedSinceMs == 0) {
+        uint32_t now = millis();
+        wifiDisconnectedSinceMs = now ? now : 1;
+      }
       stopMdns();
       break;
     default:
       break;
+  }
+}
+
+// Active STA reconnect supervisor — runs from loop(), gated on !portalMode.
+// Re-issues WiFi.begin() on a fixed cadence when the link is down (re-arming
+// the supplicant even after the core's internal retries have given up), and
+// reboots as a last resort if the device stays offline past
+// WIFI_OFFLINE_REBOOT_MS. No-ops while connected or in the setup portal.
+void wifiSupervisorTick() {
+  if (portalMode) return;                       // AP/captive-portal path owns the radio
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiDisconnectedSinceMs = 0;
+    return;
+  }
+  // Not connected. Make sure the offline timer is running even if we somehow
+  // missed the DISCONNECTED event (e.g. never associated after boot).
+  if (wifiDisconnectedSinceMs == 0) {
+    uint32_t now = millis();
+    wifiDisconnectedSinceMs = now ? now : 1;
+  }
+
+  uint32_t now = millis();
+
+  // Last-resort recovery: a full reboot reliably clears wedged Wi-Fi/lwIP
+  // state that no amount of WiFi.begin() will fix.
+  if ((now - wifiDisconnectedSinceMs) >= WIFI_OFFLINE_REBOOT_MS) {
+    Serial.println("[wifi] offline > 15 min — rebooting to recover");
+    delay(50);
+    ESP.restart();
+  }
+
+  static uint32_t lastReconnectTry = 0;
+  if (now - lastReconnectTry >= WIFI_RECONNECT_INTERVAL_MS) {
+    lastReconnectTry = now;
+    String ssid = loadString("ssid", "");
+    if (ssid.length() == 0) return;             // nothing to reconnect to
+    String pass = loadString("pass", "");
+    Serial.println("[wifi] STA down — forcing reconnect");
+    // Drop any half-open association (keep the radio on and the stored
+    // config intact), then re-issue begin() with the saved credentials.
+    // This re-arms the supplicant even after the core's internal
+    // auto-reconnect has stopped trying.
+    WiFi.disconnect(false /*wifioff*/, false /*eraseap*/);
+    WiFi.begin(ssid.c_str(), pass.c_str());
   }
 }
 
@@ -1334,6 +1400,15 @@ void startCaptivePortal() {
 void startConnectedServices() {
   // Auto shutdown of setup AP after provisioning
   stopPortalServices();
+
+  // Connection hardening (layer 1). The device is mains-powered and always
+  // on, so trade Wi-Fi power-save for link stability and make the core keep
+  // re-arming the supplicant. wifiSupervisorTick() is the active backstop on
+  // top of this if the core's own retries give up.
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(false);   // don't rewrite NVS on every (re)connect
+  WiFi.setSleep(false);     // disable modem power-save (missed-beacon drops)
+  wifiDisconnectedSinceMs = 0;
 
   // Apply configured pins
   PIN_OUT = loadInt("out", 18);
@@ -2152,6 +2227,9 @@ void loop() {
 
   // Onboard LED mirrors the output mode (off / on / breathing double-flash)
   statusLedTick();
+
+  // Keep the STA link alive (no-op in portal mode and while connected).
+  wifiSupervisorTick();
 
 #if ENABLE_AWS_IOT
   awsIotLoop();
