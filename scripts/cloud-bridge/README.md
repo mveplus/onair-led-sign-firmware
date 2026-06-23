@@ -80,6 +80,41 @@ async function setOnAir(mode /* 0|1|2 */) {
 See the device's `README.md → AWS IoT Core` for the topic shape on the
 firmware side.
 
+## Testing & troubleshooting
+
+Smoke-test the endpoint with `curl` and read the HTTP status — each layer
+fails with a distinct code, so the response tells you where the chain
+broke:
+
+```bash
+TOKEN=$(cat .onair-bridge-token)
+URL=https://<api-id>.execute-api.eu-west-1.amazonaws.com/onair
+curl -sS -w '  [%{http_code}]\n' -X POST "$URL" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"thing":"onair-office","mode":1}'
+```
+
+| Status | Meaning | Fix |
+|---|---|---|
+| `401` | bad / missing bearer token | use the value in `.onair-bridge-token` |
+| `400` | missing/invalid `thing` or `mode` | `mode` must be `0` (off), `1` (on), `2` (breathing) |
+| `403` | `thing` not in `ALLOWED_THINGS` | re-run `deploy.sh` with your real Thing name in `ALLOWED_THINGS` |
+| `200 {"ok":true}` | published to `onair/<thing>/cmd` | if the sign still doesn't move, the issue is device-side — see below |
+
+A **`200` is not proof the sign changed** — it only means the Lambda
+published. The `thing` must name a device actually subscribed to
+`onair/<thing>/cmd` (the firmware logs `subscribed onair/<thing>/cmd` on
+connect). To isolate the device from the bridge, publish straight to the
+topic and watch the device serial:
+
+```bash
+aws iot-data publish --topic 'onair/onair-office/cmd' \
+  --cli-binary-format raw-in-base64-out --payload '{"mode":1}'
+```
+
+If that flips the sign but the `curl` doesn't, the problem is the bridge
+(token/allowlist); if neither does, it's device-side (MQTT subscription).
+
 ## Tearing down
 
 The script doesn't delete anything (intentional — re-running won't
