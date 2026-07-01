@@ -69,15 +69,26 @@ else
   aws iam attach-role-policy \
     --role-name "$ROLE_NAME" \
     --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-  PUBLISH_DOC="$(jq -n --arg arn "arn:aws:iot:${AWS_REGION}:${ACCOUNT_ID}:topic/onair/*/cmd" \
-    '{Version:"2012-10-17",Statement:[{Effect:"Allow",Action:"iot:Publish",Resource:$arn}]}')"
-  aws iam put-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-name iot-publish-onair \
-    --policy-document "$PUBLISH_DOC"
   echo "Waiting 10 s for IAM role propagation…"
   sleep 10
 fi
+
+# Always (re)apply the inline IoT policy — least-privilege, and idempotent
+# so re-running deploy upgrades an existing role with new permissions:
+#   iot:Publish        onair/<thing>/cmd   — send commands to devices
+#   iot:GetThingShadow thing/onair-*       — read reported state for the
+#                                            extension's cloud `verify`
+IOT_DOC="$(jq -n \
+  --arg cmd "arn:aws:iot:${AWS_REGION}:${ACCOUNT_ID}:topic/onair/*/cmd" \
+  --arg thing "arn:aws:iot:${AWS_REGION}:${ACCOUNT_ID}:thing/onair-*" \
+  '{Version:"2012-10-17",Statement:[
+     {Effect:"Allow",Action:"iot:Publish",Resource:$cmd},
+     {Effect:"Allow",Action:"iot:GetThingShadow",Resource:$thing}
+   ]}')"
+aws iam put-role-policy \
+  --role-name "$ROLE_NAME" \
+  --policy-name iot-publish-onair \
+  --policy-document "$IOT_DOC"
 ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
 
 # ---- Lambda zip ----------------------------------------------------------
