@@ -639,9 +639,15 @@ String pageShell(const String& title, const String& body, const String& script =
        "p{margin:10px 0;color:var(--mut);line-height:1.5}"
        ".row{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}"
        "label{font-size:13px;color:var(--mut)}"
-       "input,select{width:100%;padding:12px 12px;border-radius:12px;border:1px solid rgba(169,183,214,.22);"
+       "input,select,textarea{width:100%;padding:12px 12px;border-radius:12px;border:1px solid rgba(169,183,214,.22);"
        "background:#0b1326;color:var(--txt);outline:none}"
-       "input:focus,select:focus{border-color:rgba(94,234,212,.65);box-shadow:0 0 0 4px rgba(94,234,212,.12)}"
+       "input:focus,select:focus,textarea:focus{border-color:rgba(94,234,212,.65);box-shadow:0 0 0 4px rgba(94,234,212,.12)}"
+       "textarea{resize:vertical;min-height:72px;font-family:inherit;line-height:1.4}"
+       "textarea.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}"
+       ".badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;"
+       "font-weight:600;border:1px solid rgba(169,183,214,.25);background:rgba(169,183,214,.08);color:var(--mut)}"
+       ".badge.ok{color:var(--acc);border-color:rgba(94,234,212,.4);background:rgba(94,234,212,.1)}"
+       ".badge.bad{color:var(--bad);border-color:rgba(251,113,133,.4);background:rgba(251,113,133,.1)}"
        ".btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;margin-bottom:10px}"
        "button{padding:10px 12px;border-radius:12px;border:1px solid rgba(94,234,212,.35);"
        "background:linear-gradient(180deg, rgba(94,234,212,.18), rgba(94,234,212,.06));"
@@ -847,16 +853,20 @@ String connectedPage() {
   body += "</details>";
 #if ENABLE_AWS_IOT
   body += "<details class='section'><summary class='hint'>AWS IoT</summary>";
-  body += "<p>Status: <code id='awsStatus'>loading…</code></p>";
+  body += "<p>Status: <span id='awsStatus' class='badge'>loading…</span></p>";
+  body += "<div class='grid2'>";
   body += "<div><label>Endpoint</label><input id='awsEndpoint' placeholder='xxxx-ats.iot.&lt;region&gt;.amazonaws.com' autocomplete='off'/></div>";
   body += "<div><label>Thing name (optional)</label><input id='awsThing' placeholder='onair-&lt;mac12&gt;' autocomplete='off'/></div>";
-  body += "<details><summary class='hint'>Override Root CA (optional — bundled Amazon Root CA 1 is used by default)</summary>";
-  body += "<textarea id='awsCa' rows='6' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea>";
+  body += "</div>";
+  body += "<div class='row'>";
+  body += "<div><label>Client certificate (PEM)</label><textarea id='awsCert' class='mono' rows='8' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "<div><label>Client private key (PEM)</label><textarea id='awsKey' class='mono' rows='8' placeholder='-----BEGIN PRIVATE KEY-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "</div>";
+  body += "<details class='section'><summary class='hint'>Override Root CA (optional — bundled Amazon Root CA 1 is used by default)</summary>";
+  body += "<textarea id='awsCa' class='mono' rows='6' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea>";
   body += "</details>";
-  body += "<div><label>Client certificate (PEM)</label><textarea id='awsCert' rows='8' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea></div>";
-  body += "<div><label>Client private key (PEM)</label><textarea id='awsKey' rows='8' placeholder='-----BEGIN PRIVATE KEY-----' autocomplete='off' spellcheck='false'></textarea></div>";
   body += "<div class='btns'>";
-  body += "<button id='btnAwsSave' class='secondary' onclick='awsSave()'>Save</button>";
+  body += "<button id='btnAwsSave' onclick='awsSave()'>Save</button>";
   body += "<button id='btnAwsForget' class='secondary' onclick='awsForget()'>Forget</button>";
   body += "</div>";
   body += "<p class='hint'>Cert and key are POSTed to <code>/api/aws/provision</code> and stored in NVS. They are never echoed back by the device.</p>";
@@ -864,15 +874,19 @@ String connectedPage() {
 
   body += "<details class='section'><summary class='hint'>AWS IoT — Fleet Provisioning by Claim</summary>";
   body += "<p class='hint'>Bootstrap a per-device identity using a shared claim cert. Set up a Provisioning Template + claim cert in AWS IoT first; the claim cert is used once and never stored on the device.</p>";
+  body += "<div class='grid2'>";
   body += "<div><label>Endpoint</label><input id='awsClaimEndpoint' placeholder='xxxx-ats.iot.&lt;region&gt;.amazonaws.com' autocomplete='off'/></div>";
   body += "<div><label>Provisioning template name</label><input id='awsClaimTemplate' placeholder='OnAirSignProvisioningTemplate' autocomplete='off'/></div>";
-  body += "<details><summary class='hint'>Override Root CA (optional)</summary>";
-  body += "<textarea id='awsClaimCa' rows='6' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea>";
+  body += "</div>";
+  body += "<div class='row'>";
+  body += "<div><label>Claim certificate (PEM)</label><textarea id='awsClaimCert' class='mono' rows='8' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "<div><label>Claim private key (PEM)</label><textarea id='awsClaimKey' class='mono' rows='8' placeholder='-----BEGIN PRIVATE KEY-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "<div><label>Parameters (optional JSON object)</label><textarea id='awsClaimParams' class='mono' rows='3' placeholder='{\"SerialNumber\":\"...\",\"Location\":\"office\"}' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "</div>";
+  body += "<details class='section'><summary class='hint'>Override Root CA (optional)</summary>";
+  body += "<textarea id='awsClaimCa' class='mono' rows='6' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea>";
   body += "</details>";
-  body += "<div><label>Claim certificate (PEM)</label><textarea id='awsClaimCert' rows='8' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea></div>";
-  body += "<div><label>Claim private key (PEM)</label><textarea id='awsClaimKey' rows='8' placeholder='-----BEGIN PRIVATE KEY-----' autocomplete='off' spellcheck='false'></textarea></div>";
-  body += "<div><label>Parameters (optional JSON object)</label><textarea id='awsClaimParams' rows='3' placeholder='{\"SerialNumber\":\"...\",\"Location\":\"office\"}' autocomplete='off' spellcheck='false'></textarea></div>";
-  body += "<div class='btns'><button id='btnAwsClaim' class='secondary' onclick='awsRunClaim()'>Run claim flow</button></div>";
+  body += "<div class='btns'><button id='btnAwsClaim' onclick='awsRunClaim()'>Run claim flow</button></div>";
   body += "<p class='hint'>Takes ~10-30 seconds. On success the device persists the resulting per-device cert and reconnects automatically; the claim cert is dropped.</p>";
   body += "</details>";
 #endif
@@ -969,13 +983,14 @@ String connectedPage() {
 #if ENABLE_AWS_IOT
             "async function awsRefreshStatus(){"
             "  const s=document.getElementById('awsStatus'); if(!s) return;"
+            "  const set=(t,c)=>{s.textContent=t; s.className='badge'+(c?' '+c:'');};"
             "  try{"
             "    const r=await fetchWithTimeout('/api/aws/status', {}, 2000);"
             "    const j=await r.json();"
-            "    if(!j.provisioned){s.textContent='not provisioned';}"
-            "    else if(j.connected){s.textContent='connected ('+j.thing+' @ '+j.endpoint+')';}"
-            "    else{s.textContent='provisioned but disconnected (rc='+j.last_rc+')';}"
-            "  }catch(e){s.textContent='status error';}"
+            "    if(!j.provisioned){set('not provisioned','');}"
+            "    else if(j.connected){set('connected · '+j.thing,'ok');}"
+            "    else{set('disconnected (rc='+j.last_rc+')','bad');}"
+            "  }catch(e){set('status error','bad');}"
             "}"
             "async function awsSave(){"
             "  const endpoint=document.getElementById('awsEndpoint').value.trim();"
