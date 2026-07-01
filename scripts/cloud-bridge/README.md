@@ -48,6 +48,39 @@ At the end you'll get:
 - A **bearer token** stashed at `.onair-bridge-token` (chmod 600)
 - A copy-pasteable smoke test (off → on → breathing → off)
 
+## Reading device state (cloud `verify`)
+
+The same endpoint answers a **`GET ?thing=<thing>`** that returns the
+device's last reported state, read from its AWS IoT **Device Shadow**:
+
+```json
+{ "ok": true, "thing": "onair-test-1", "mode": 2,
+  "reported": { "mode": 2, "output_mode": "breathing", "rssi": -55 }, "ts": 1700000000 }
+```
+
+The firmware reports into the shadow on every `setOutputMode` (see
+`aws_iot.cpp`), so this is the durable last-known state the extension's
+`verify` reconcile compares against when the LAN path is unreachable.
+`POST` still publishes a command; only the HTTP method differs.
+
+The device cert's `OnAirSignPolicy` already allows the shadow topics, and
+`deploy.sh` grants the Lambda `iot:GetThingShadow` (re-run it to upgrade an
+existing role). No new API Gateway route is needed — the `$default` route
+forwards both methods.
+
+### Validate the whole path without the device
+
+`validate-shadow.sh` seeds a shadow (as if the firmware reported it),
+reads it straight from AWS, then reads it back through the Lambda:
+
+```bash
+AWS_PROFILE=onair-iot ./scripts/cloud-bridge/validate-shadow.sh onair-test-1 2
+# → PASS — Lambda returned mode=2 from the shadow.
+```
+
+Unit tests for the Lambda run offline (no AWS): `python3 -m pytest` in this
+directory.
+
 ## Chrome extension wiring
 
 Add three settings the user fills in once:

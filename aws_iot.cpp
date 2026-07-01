@@ -60,6 +60,7 @@ String g_thingName;
 String g_endpoint;
 String topicState;
 String topicCmd;
+String topicShadow;   // $aws/things/<thing>/shadow/update — reported state
 
 uint32_t lastReconnectAttempt = 0;
 const uint32_t RECONNECT_BACKOFF_MS = 5000;
@@ -188,6 +189,7 @@ void teardownConnection() {
   g_endpoint    = "";
   topicState    = "";
   topicCmd      = "";
+  topicShadow   = "";
 }
 
 }  // namespace
@@ -201,8 +203,9 @@ void awsIotSetup() {
   }
   g_provisioned = true;
 
-  topicState = String("onair/") + g_thingName + "/state";
-  topicCmd   = String("onair/") + g_thingName + "/cmd";
+  topicState  = String("onair/") + g_thingName + "/state";
+  topicCmd    = String("onair/") + g_thingName + "/cmd";
+  topicShadow = String("$aws/things/") + g_thingName + "/shadow/update";
 
   tlsClient.setCACert(g_caBuf.c_str());
   tlsClient.setCertificate(g_certBuf.c_str());
@@ -232,17 +235,44 @@ void awsIotLoop() {
   mqtt.loop();
 }
 
+// Map a mode int to the same "off|on|breathing" string the local
+// /api/status returns and the cloud Lambda's parse_reported_mode expects,
+// so device, cloud, and extension all agree on the vocabulary.
+static const char* modeName(int mode) {
+  return mode == 1 ? "on" : mode == 2 ? "breathing" : "off";
+}
+
 void awsIotPublishState(int mode) {
   g_lastPublishedMode = mode;
   if (!mqtt.connected()) return;
-  StaticJsonDocument<160> doc;
-  doc["mode"]      = mode;
-  doc["thing"]     = g_thingName;
-  doc["uptime_ms"] = (uint32_t)millis();
-  doc["rssi"]      = WiFi.RSSI();
-  char buf[192];
-  size_t n = serializeJson(doc, buf, sizeof(buf));
-  mqtt.publish(topicState.c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
+
+  // 1) Plain telemetry topic (kept for debugging / other subscribers).
+  {
+    StaticJsonDocument<160> doc;
+    doc["mode"]      = mode;
+    doc["thing"]     = g_thingName;
+    doc["uptime_ms"] = (uint32_t)millis();
+    doc["rssi"]      = WiFi.RSSI();
+    char buf[192];
+    size_t n = serializeJson(doc, buf, sizeof(buf));
+    mqtt.publish(topicState.c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
+  }
+
+  // 2) Device Shadow reported state — durable last-known state the cloud
+  //    Lambda reads back for the extension's `verify` reconcile. The
+  //    `reported` object is intentionally extensible: add future sensor
+  //    fields here and they flow through to the shadow automatically.
+  if (topicShadow.length() > 0) {
+    StaticJsonDocument<256> doc;
+    JsonObject reported = doc["state"]["reported"].to<JsonObject>();
+    reported["mode"]        = mode;
+    reported["output_mode"] = modeName(mode);
+    reported["rssi"]        = WiFi.RSSI();
+    reported["uptime_ms"]   = (uint32_t)millis();
+    char buf[256];
+    size_t n = serializeJson(doc, buf, sizeof(buf));
+    mqtt.publish(topicShadow.c_str(), reinterpret_cast<const uint8_t*>(buf), n, false);
+  }
 }
 
 bool awsIotProvision(const String& endpoint,
