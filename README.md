@@ -116,6 +116,14 @@ that wipes `mfg` re-arms it.
 
 You can either flash the provided binaries from `build/` or upload a locally built sketch with [`arduino-cli`](https://github.com/arduino/arduino-cli) or [`esptool.py`](https://github.com/espressif/esptool)
 
+> **Partition layout (`partitions.csv`):** the firmware ships a custom 4MB
+> table — two ~1.94MB OTA app slots (the stock scheme wasted 1.5MB on an
+> unused SPIFFS and left the app at 99% full; this drops it to ~63%). OTA
+> is preserved. **One-time caveat:** moving a device *onto* this layout
+> changes the partition table, which OTA cannot do — the first update from
+> a stock build must be a **USB re-flash** (Option A/B, `merged.bin` at
+> `0x0`). After that, OTA (Option C) works as normal.
+
 ### Option A: Flash a Released Binary
 
 Tagged releases publish merged binaries per board to [GitHub Releases](https://github.com/mveplus/onair-led-sign-firmware/releases) (binaries are no longer tracked in git). Download `onair-led-sign-<board>-<version>.merged.bin` and flash:
