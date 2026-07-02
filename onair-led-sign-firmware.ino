@@ -649,6 +649,8 @@ String pageShell(const String& title, const String& body, const String& script =
        "padding:9px 12px;border-radius:10px;cursor:pointer;color:var(--mut);"
        "border:1px solid rgba(169,183,214,.35);background:rgba(169,183,214,.08)}"
        "input[type=file]::file-selector-button:hover{border-color:rgba(94,234,212,.6);color:var(--txt)}"
+       ".bar{height:10px;border-radius:999px;background:rgba(169,183,214,.15);overflow:hidden;margin-top:10px}"
+       ".barfill{height:100%;width:0;background:linear-gradient(90deg,var(--acc),#7ee7ff);transition:width .25s ease}"
        ".badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;"
        "font-weight:600;border:1px solid rgba(169,183,214,.25);background:rgba(169,183,214,.08);color:var(--mut)}"
        ".badge.ok{color:var(--acc);border-color:rgba(94,234,212,.4);background:rgba(94,234,212,.1)}"
@@ -1869,17 +1871,50 @@ void setupHttpHandlers() {
     }
     String body;
     body += "<p>Upload a compiled <b>.bin</b> to update firmware.</p>";
-    body += "<form method='POST' action='/update' enctype='multipart/form-data'>"
-            "<input type='file' name='firmware' accept='.bin' required/>"
-            "<div class='btns'><button id='btnUpload' type='submit'>Upload & Update</button></div>"
-            "</form>"
-            "<p class='hint'>After upload completes, the device will reboot.</p>";
+    // Keep method/action so the no-JS fallback still POSTs (303 -> /update/done).
+    body += "<form id='otaForm' method='POST' action='/update' enctype='multipart/form-data'>"
+            "<input type='file' id='otaFile' name='firmware' accept='.bin' required/>"
+            "<div class='btns'><button id='btnUpload' type='submit'>Upload &amp; Update</button></div>"
+            "</form>";
+    body += "<div id='otaProg' style='display:none'>"
+            "<div class='hint' id='otaStatus'>Starting…</div>"
+            "<div class='bar'><div class='barfill' id='otaBar'></div></div>"
+            "</div>";
+    body += "<p class='hint'>The device reboots after upload; this page shows progress, waits for it to come back online, then returns home — or tells you if it can't be reached.</p>";
+    // Enhanced flow: AJAX upload with a progress bar, then poll /api/status
+    // until the device is back (redirect home) or report it offline.
     String script;
-    script += "document.addEventListener('DOMContentLoaded',()=>{"
-              "  const b=document.getElementById('btnUpload');"
-              "  const f=document.querySelector('form');"
-              "  if(b&&f){f.addEventListener('submit',()=>{b.classList.add('active'); b.classList.add('busy');});}"
-              "});";
+    script += "(function(){";
+    script += "var form=document.getElementById('otaForm'),file=document.getElementById('otaFile'),";
+    script += "btn=document.getElementById('btnUpload'),prog=document.getElementById('otaProg'),";
+    script += "bar=document.getElementById('otaBar'),st=document.getElementById('otaStatus');";
+    script += "function set(t,c){st.textContent=t; st.className='hint'+(c?' '+c:'');}";
+    script += "function stop(){btn.disabled=false; btn.classList.remove('busy','active');}";
+    script += "async function wait(){";
+    script += "  set('Flashing & rebooting\\u2026');";
+    script += "  await new Promise(function(r){setTimeout(r,5000);});";
+    script += "  set('Waiting for device to come back\\u2026');";
+    script += "  for(var i=0;i<60;i++){";
+    script += "    try{var r=await fetch('/api/status',{cache:'no-store'});";
+    // Any resolved response (even 401) means the device is reachable again.
+    script += "      if(r){set('Online. Redirecting\\u2026','ok'); await new Promise(function(x){setTimeout(x,600);}); location.href='/'; return;}}catch(e){}";
+    script += "    await new Promise(function(r){setTimeout(r,1000);});";
+    script += "  }";
+    script += "  set('Device offline \\u2014 the update may have failed. Power-cycle it, then reload this page.','bad'); stop();";
+    script += "}";
+    script += "function done(){bar.style.width='100%'; wait();}";
+    script += "if(form){form.addEventListener('submit',function(e){";
+    script += "  e.preventDefault(); if(!file.files.length) return;";
+    script += "  btn.disabled=true; btn.classList.add('active','busy'); prog.style.display='block'; set('Uploading\\u2026');";
+    script += "  var fd=new FormData(); fd.append('firmware',file.files[0]);";
+    script += "  var x=new XMLHttpRequest(); x.open('POST','/update'); x.setRequestHeader('Accept','application/json');";
+    script += "  x.upload.onprogress=function(ev){ if(ev.lengthComputable){ var p=Math.round(ev.loaded/ev.total*100); bar.style.width=p+'%'; set('Uploading '+p+'%\\u2026'); } };";
+    script += "  x.onload=function(){ var ok=false; try{ ok=JSON.parse(x.responseText).ok; }catch(e){}";
+    script += "    if(x.status===200&&ok){ done(); } else { set('Update rejected by the device \\u2014 check the .bin and retry.','bad'); stop(); } };";
+    script += "  x.onerror=function(){ done(); };"; // connection often drops as the device reboots mid-response
+    script += "  x.send(fd);";
+    script += "});}";
+    script += "})();";
     AsyncWebServerResponse *resp = request->beginResponse(
       200, "text/html", pageShell("OTA Update", body, script, true)
     );
@@ -1910,7 +1945,9 @@ void setupHttpHandlers() {
             "  for(let i=0;i<60;i++){"
             "    try{"
             "      const r=await fetch('/api/status',{cache:'no-store'});"
-            "      if(r.ok){s.textContent='Online. Redirecting\\u2026'; await new Promise(r=>setTimeout(r,500)); location.href='/'; return;}"
+            // Any HTTP response (even 401 when creds aren't attached to the
+            // fetch) proves the device is back up — treat that as online.
+            "      if(r){s.textContent='Online. Redirecting\\u2026'; await new Promise(r=>setTimeout(r,500)); location.href='/'; return;}"
             "    }catch(e){}"
             "    await new Promise(r=>setTimeout(r,1000));"
             "  }"
