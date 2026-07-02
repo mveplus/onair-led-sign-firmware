@@ -158,5 +158,19 @@ Done.
     - $(basename "$ROOT_CA")
     - cert-meta.json
 
-Next: copy these into secrets.h (escaped as C string literals) and rebuild.
+Next: load these onto the device at runtime (no rebuild, no secrets.h).
+With the sign on your network, POST them to /api/aws/provision:
+
+  DIR=$OUT_DIR
+  jq -n \\
+    --arg endpoint "$ENDPOINT" \\
+    --arg thing_name "$THING_NAME" \\
+    --arg cert "\$(cat \$DIR/${THING_NAME}.cert.pem)" \\
+    --arg key  "\$(cat \$DIR/${THING_NAME}.private.key)" \\
+    '{endpoint:\$endpoint, thing_name:\$thing_name, cert:\$cert, key:\$key}' \\
+  | curl -u admin:esp32c6 -X POST "http://<device-ip>/api/aws/provision" \\
+      -H 'Content-Type: application/json' --data-binary @-
+
+(root_ca is optional — omit it to use the firmware's bundled Amazon Root CA 1.)
+Verify with: curl -u admin:esp32c6 http://<device-ip>/api/aws/status
 EOF

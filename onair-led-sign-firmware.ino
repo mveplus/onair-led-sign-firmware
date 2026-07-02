@@ -154,6 +154,18 @@ static int lastScanCount = -2; // -2 means "never started"
 static uint32_t lastScanStartedMs = 0;
 static const uint32_t SCAN_MAX_WAIT_MS = 6000;
 
+// ---------------- WiFi reconnect supervisor (STA mode only) ----------------
+// The ESP32 core's internal auto-reconnect gives up under common real-world
+// disconnect reasons (router reboot/NO_AP_FOUND, auth/DHCP timeout, band
+// steering), after which nothing re-arms the supplicant and the device sits
+// offline until power-cycled. The supervisor below actively re-issues
+// WiFi.begin() on a fixed cadence and, as a last resort, reboots if the link
+// stays down too long. All of it is gated on !portalMode so it never touches
+// the AP/captive-portal path.
+static uint32_t wifiDisconnectedSinceMs = 0;   // 0 = currently connected / never dropped
+static const uint32_t WIFI_RECONNECT_INTERVAL_MS = 10000;          // re-issue begin() every 10s
+static const uint32_t WIFI_OFFLINE_REBOOT_MS     = 15UL * 60UL * 1000UL; // reboot after 15 min offline
+
 // ---------------- Delayed reboot ----------------
 
 // ---------------- Helpers ----------------
@@ -627,9 +639,22 @@ String pageShell(const String& title, const String& body, const String& script =
        "p{margin:10px 0;color:var(--mut);line-height:1.5}"
        ".row{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}"
        "label{font-size:13px;color:var(--mut)}"
-       "input,select{width:100%;padding:12px 12px;border-radius:12px;border:1px solid rgba(169,183,214,.22);"
+       "input,select,textarea{width:100%;padding:12px 12px;border-radius:12px;border:1px solid rgba(169,183,214,.22);"
        "background:#0b1326;color:var(--txt);outline:none}"
-       "input:focus,select:focus{border-color:rgba(94,234,212,.65);box-shadow:0 0 0 4px rgba(94,234,212,.12)}"
+       "input:focus,select:focus,textarea:focus{border-color:rgba(94,234,212,.65);box-shadow:0 0 0 4px rgba(94,234,212,.12)}"
+       "textarea{resize:vertical;min-height:72px;font-family:inherit;line-height:1.4}"
+       "textarea.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}"
+       "input[type=file]{padding:8px 10px;cursor:pointer}"
+       "input[type=file]::file-selector-button{font:inherit;font-weight:700;font-size:13px;margin-right:12px;"
+       "padding:9px 12px;border-radius:10px;cursor:pointer;color:var(--mut);"
+       "border:1px solid rgba(169,183,214,.35);background:rgba(169,183,214,.08)}"
+       "input[type=file]::file-selector-button:hover{border-color:rgba(94,234,212,.6);color:var(--txt)}"
+       ".bar{height:10px;border-radius:999px;background:rgba(169,183,214,.15);overflow:hidden;margin-top:10px}"
+       ".barfill{height:100%;width:0;background:linear-gradient(90deg,var(--acc),#7ee7ff);transition:width .25s ease}"
+       ".badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;"
+       "font-weight:600;border:1px solid rgba(169,183,214,.25);background:rgba(169,183,214,.08);color:var(--mut)}"
+       ".badge.ok{color:var(--acc);border-color:rgba(94,234,212,.4);background:rgba(94,234,212,.1)}"
+       ".badge.bad{color:var(--bad);border-color:rgba(251,113,133,.4);background:rgba(251,113,133,.1)}"
        ".btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;margin-bottom:10px}"
        "button{padding:10px 12px;border-radius:12px;border:1px solid rgba(94,234,212,.35);"
        "background:linear-gradient(180deg, rgba(94,234,212,.18), rgba(94,234,212,.06));"
@@ -804,7 +829,7 @@ String setupPage() {
             "  setTimeout(()=>{location.href='/';},1200);"
             "};"
             "function syncOut(){const sel=document.getElementById('out_sel'); const custom=document.getElementById('out_custom'); const useEl=document.getElementById('usebl'); if(sel&&useEl){sel.disabled=useEl.checked;} if(custom&&useEl){custom.disabled=useEl.checked;}}"
-            "document.addEventListener('DOMContentLoaded',()=>{const useEl=document.getElementById('usebl'); if(useEl){useEl.addEventListener('change',syncOut);} const outSel=document.getElementById('out_sel'); if(outSel){outSel.addEventListener('change',toggleCustomOut); outSel.value=OUT_SEL_DEFAULT;} const ssSel=document.getElementById('ssidSel'); if(ssSel){ssSel.addEventListener('change',toggleManual);} toggleCustomOut(); syncOut(); toggleManual(); rescan();});";
+            "document.addEventListener('DOMContentLoaded',()=>{const useEl=document.getElementById('usebl'); if(useEl){useEl.addEventListener('change',syncOut);} const outSel=document.getElementById('out_sel'); if(outSel){outSel.addEventListener('change',()=>{const u=document.getElementById('usebl'); if(u&&u.checked){u.checked=false; syncOut();} toggleCustomOut();}); outSel.value=OUT_SEL_DEFAULT;} const ssSel=document.getElementById('ssidSel'); if(ssSel){ssSel.addEventListener('change',toggleManual);} toggleCustomOut(); syncOut(); toggleManual(); rescan();});";
   return pageShell("Wi‑Fi Setup", body, script);
 }
 
@@ -835,16 +860,20 @@ String connectedPage() {
   body += "</details>";
 #if ENABLE_AWS_IOT
   body += "<details class='section'><summary class='hint'>AWS IoT</summary>";
-  body += "<p>Status: <code id='awsStatus'>loading…</code></p>";
+  body += "<p>Status: <span id='awsStatus' class='badge'>loading…</span></p>";
+  body += "<div class='grid2'>";
   body += "<div><label>Endpoint</label><input id='awsEndpoint' placeholder='xxxx-ats.iot.&lt;region&gt;.amazonaws.com' autocomplete='off'/></div>";
   body += "<div><label>Thing name (optional)</label><input id='awsThing' placeholder='onair-&lt;mac12&gt;' autocomplete='off'/></div>";
-  body += "<details><summary class='hint'>Override Root CA (optional — bundled Amazon Root CA 1 is used by default)</summary>";
-  body += "<textarea id='awsCa' rows='6' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea>";
+  body += "</div>";
+  body += "<div class='row'>";
+  body += "<div><label>Client certificate (PEM)</label><textarea id='awsCert' class='mono' rows='8' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "<div><label>Client private key (PEM)</label><textarea id='awsKey' class='mono' rows='8' placeholder='-----BEGIN PRIVATE KEY-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "</div>";
+  body += "<details class='section'><summary class='hint'>Override Root CA (optional — bundled Amazon Root CA 1 is used by default)</summary>";
+  body += "<textarea id='awsCa' class='mono' rows='6' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea>";
   body += "</details>";
-  body += "<div><label>Client certificate (PEM)</label><textarea id='awsCert' rows='8' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea></div>";
-  body += "<div><label>Client private key (PEM)</label><textarea id='awsKey' rows='8' placeholder='-----BEGIN PRIVATE KEY-----' autocomplete='off' spellcheck='false'></textarea></div>";
   body += "<div class='btns'>";
-  body += "<button id='btnAwsSave' class='secondary' onclick='awsSave()'>Save</button>";
+  body += "<button id='btnAwsSave' onclick='awsSave()'>Save</button>";
   body += "<button id='btnAwsForget' class='secondary' onclick='awsForget()'>Forget</button>";
   body += "</div>";
   body += "<p class='hint'>Cert and key are POSTed to <code>/api/aws/provision</code> and stored in NVS. They are never echoed back by the device.</p>";
@@ -852,15 +881,19 @@ String connectedPage() {
 
   body += "<details class='section'><summary class='hint'>AWS IoT — Fleet Provisioning by Claim</summary>";
   body += "<p class='hint'>Bootstrap a per-device identity using a shared claim cert. Set up a Provisioning Template + claim cert in AWS IoT first; the claim cert is used once and never stored on the device.</p>";
+  body += "<div class='grid2'>";
   body += "<div><label>Endpoint</label><input id='awsClaimEndpoint' placeholder='xxxx-ats.iot.&lt;region&gt;.amazonaws.com' autocomplete='off'/></div>";
   body += "<div><label>Provisioning template name</label><input id='awsClaimTemplate' placeholder='OnAirSignProvisioningTemplate' autocomplete='off'/></div>";
-  body += "<details><summary class='hint'>Override Root CA (optional)</summary>";
-  body += "<textarea id='awsClaimCa' rows='6' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea>";
+  body += "</div>";
+  body += "<div class='row'>";
+  body += "<div><label>Claim certificate (PEM)</label><textarea id='awsClaimCert' class='mono' rows='8' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "<div><label>Claim private key (PEM)</label><textarea id='awsClaimKey' class='mono' rows='8' placeholder='-----BEGIN PRIVATE KEY-----' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "<div><label>Parameters (optional JSON object)</label><textarea id='awsClaimParams' class='mono' rows='3' placeholder='{\"SerialNumber\":\"...\",\"Location\":\"office\"}' autocomplete='off' spellcheck='false'></textarea></div>";
+  body += "</div>";
+  body += "<details class='section'><summary class='hint'>Override Root CA (optional)</summary>";
+  body += "<textarea id='awsClaimCa' class='mono' rows='6' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea>";
   body += "</details>";
-  body += "<div><label>Claim certificate (PEM)</label><textarea id='awsClaimCert' rows='8' placeholder='-----BEGIN CERTIFICATE-----' autocomplete='off' spellcheck='false'></textarea></div>";
-  body += "<div><label>Claim private key (PEM)</label><textarea id='awsClaimKey' rows='8' placeholder='-----BEGIN PRIVATE KEY-----' autocomplete='off' spellcheck='false'></textarea></div>";
-  body += "<div><label>Parameters (optional JSON object)</label><textarea id='awsClaimParams' rows='3' placeholder='{\"SerialNumber\":\"...\",\"Location\":\"office\"}' autocomplete='off' spellcheck='false'></textarea></div>";
-  body += "<div class='btns'><button id='btnAwsClaim' class='secondary' onclick='awsRunClaim()'>Run claim flow</button></div>";
+  body += "<div class='btns'><button id='btnAwsClaim' onclick='awsRunClaim()'>Run claim flow</button></div>";
   body += "<p class='hint'>Takes ~10-30 seconds. On success the device persists the resulting per-device cert and reconnects automatically; the claim cert is dropped.</p>";
   body += "</details>";
 #endif
@@ -957,13 +990,14 @@ String connectedPage() {
 #if ENABLE_AWS_IOT
             "async function awsRefreshStatus(){"
             "  const s=document.getElementById('awsStatus'); if(!s) return;"
+            "  const set=(t,c)=>{s.textContent=t; s.className='badge'+(c?' '+c:'');};"
             "  try{"
             "    const r=await fetchWithTimeout('/api/aws/status', {}, 2000);"
             "    const j=await r.json();"
-            "    if(!j.provisioned){s.textContent='not provisioned';}"
-            "    else if(j.connected){s.textContent='connected ('+j.thing+' @ '+j.endpoint+')';}"
-            "    else{s.textContent='provisioned but disconnected (rc='+j.last_rc+')';}"
-            "  }catch(e){s.textContent='status error';}"
+            "    if(!j.provisioned){set('not provisioned','');}"
+            "    else if(j.connected){set('connected · '+j.thing,'ok');}"
+            "    else{set('disconnected (rc='+j.last_rc+')','bad');}"
+            "  }catch(e){set('status error','bad');}"
             "}"
             "async function awsSave(){"
             "  const endpoint=document.getElementById('awsEndpoint').value.trim();"
@@ -1219,13 +1253,67 @@ void startMdnsIfNeeded() {
 void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
   switch (event) {
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      wifiDisconnectedSinceMs = 0;   // link is healthy again; clears the offline timer
       startMdnsIfNeeded();
       break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      // Record when the link first went down so the supervisor can escalate
+      // to a reboot if it never comes back. Only stamp the first drop in a
+      // run so repeated DISCONNECTED events don't keep pushing the deadline
+      // out. millis() can be 0 at the very first tick — bias to 1 so the
+      // "0 = connected" sentinel stays unambiguous.
+      if (wifiDisconnectedSinceMs == 0) {
+        uint32_t now = millis();
+        wifiDisconnectedSinceMs = now ? now : 1;
+      }
       stopMdns();
       break;
     default:
       break;
+  }
+}
+
+// Active STA reconnect supervisor — runs from loop(), gated on !portalMode.
+// Re-issues WiFi.begin() on a fixed cadence when the link is down (re-arming
+// the supplicant even after the core's internal retries have given up), and
+// reboots as a last resort if the device stays offline past
+// WIFI_OFFLINE_REBOOT_MS. No-ops while connected or in the setup portal.
+void wifiSupervisorTick() {
+  if (portalMode) return;                       // AP/captive-portal path owns the radio
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiDisconnectedSinceMs = 0;
+    return;
+  }
+  // Not connected. Make sure the offline timer is running even if we somehow
+  // missed the DISCONNECTED event (e.g. never associated after boot).
+  if (wifiDisconnectedSinceMs == 0) {
+    uint32_t now = millis();
+    wifiDisconnectedSinceMs = now ? now : 1;
+  }
+
+  uint32_t now = millis();
+
+  // Last-resort recovery: a full reboot reliably clears wedged Wi-Fi/lwIP
+  // state that no amount of WiFi.begin() will fix.
+  if ((now - wifiDisconnectedSinceMs) >= WIFI_OFFLINE_REBOOT_MS) {
+    Serial.println("[wifi] offline > 15 min — rebooting to recover");
+    delay(50);
+    ESP.restart();
+  }
+
+  static uint32_t lastReconnectTry = 0;
+  if (now - lastReconnectTry >= WIFI_RECONNECT_INTERVAL_MS) {
+    lastReconnectTry = now;
+    String ssid = loadString("ssid", "");
+    if (ssid.length() == 0) return;             // nothing to reconnect to
+    String pass = loadString("pass", "");
+    Serial.println("[wifi] STA down — forcing reconnect");
+    // Drop any half-open association (keep the radio on and the stored
+    // config intact), then re-issue begin() with the saved credentials.
+    // This re-arms the supplicant even after the core's internal
+    // auto-reconnect has stopped trying.
+    WiFi.disconnect(false /*wifioff*/, false /*eraseap*/);
+    WiFi.begin(ssid.c_str(), pass.c_str());
   }
 }
 
@@ -1334,6 +1422,15 @@ void startCaptivePortal() {
 void startConnectedServices() {
   // Auto shutdown of setup AP after provisioning
   stopPortalServices();
+
+  // Connection hardening (layer 1). The device is mains-powered and always
+  // on, so trade Wi-Fi power-save for link stability and make the core keep
+  // re-arming the supplicant. wifiSupervisorTick() is the active backstop on
+  // top of this if the core's own retries give up.
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(false);   // don't rewrite NVS on every (re)connect
+  WiFi.setSleep(false);     // disable modem power-save (missed-beacon drops)
+  wifiDisconnectedSinceMs = 0;
 
   // Apply configured pins
   PIN_OUT = loadInt("out", 18);
@@ -1491,8 +1588,8 @@ void setupHttpHandlers() {
             serializeJson(resp, outS);
             request->send(200, "application/json", outS);
 
-            delay(250);
-            ESP.restart();
+            // Defer restart until the response has flushed (see /api/pin).
+            scheduleReboot(300);
             return;
           }
         }
@@ -1685,8 +1782,10 @@ void setupHttpHandlers() {
     String out;
     serializeJson(doc, out);
     request->send(200, "application/json", out);
-    delay(250);
-    ESP.restart();
+    // Defer the restart so AsyncWebServer can flush the response first —
+    // a synchronous ESP.restart() here drops the connection mid-send on
+    // the single-core C6, leaving the client (curl) hanging.
+    scheduleReboot(300);
   });
 
   // Set the onboard LED active level at runtime (active HIGH vs active LOW).
@@ -1772,17 +1871,50 @@ void setupHttpHandlers() {
     }
     String body;
     body += "<p>Upload a compiled <b>.bin</b> to update firmware.</p>";
-    body += "<form method='POST' action='/update' enctype='multipart/form-data'>"
-            "<input type='file' name='firmware' accept='.bin' required/>"
-            "<div class='btns'><button id='btnUpload' type='submit'>Upload & Update</button></div>"
-            "</form>"
-            "<p class='hint'>After upload completes, the device will reboot.</p>";
+    // Keep method/action so the no-JS fallback still POSTs (303 -> /update/done).
+    body += "<form id='otaForm' method='POST' action='/update' enctype='multipart/form-data'>"
+            "<input type='file' id='otaFile' name='firmware' accept='.bin' required/>"
+            "<div class='btns'><button id='btnUpload' type='submit'>Upload &amp; Update</button></div>"
+            "</form>";
+    body += "<div id='otaProg' style='display:none'>"
+            "<div class='hint' id='otaStatus'>Starting…</div>"
+            "<div class='bar'><div class='barfill' id='otaBar'></div></div>"
+            "</div>";
+    body += "<p class='hint'>The device reboots after upload; this page shows progress, waits for it to come back online, then returns home — or tells you if it can't be reached.</p>";
+    // Enhanced flow: AJAX upload with a progress bar, then poll /api/status
+    // until the device is back (redirect home) or report it offline.
     String script;
-    script += "document.addEventListener('DOMContentLoaded',()=>{"
-              "  const b=document.getElementById('btnUpload');"
-              "  const f=document.querySelector('form');"
-              "  if(b&&f){f.addEventListener('submit',()=>{b.classList.add('active'); b.classList.add('busy');});}"
-              "});";
+    script += "(function(){";
+    script += "var form=document.getElementById('otaForm'),file=document.getElementById('otaFile'),";
+    script += "btn=document.getElementById('btnUpload'),prog=document.getElementById('otaProg'),";
+    script += "bar=document.getElementById('otaBar'),st=document.getElementById('otaStatus');";
+    script += "function set(t,c){st.textContent=t; st.className='hint'+(c?' '+c:'');}";
+    script += "function stop(){btn.disabled=false; btn.classList.remove('busy','active');}";
+    script += "async function wait(){";
+    script += "  set('Flashing & rebooting\\u2026');";
+    script += "  await new Promise(function(r){setTimeout(r,5000);});";
+    script += "  set('Waiting for device to come back\\u2026');";
+    script += "  for(var i=0;i<60;i++){";
+    script += "    try{var r=await fetch('/api/status',{cache:'no-store'});";
+    // Any resolved response (even 401) means the device is reachable again.
+    script += "      if(r){set('Online. Redirecting\\u2026','ok'); await new Promise(function(x){setTimeout(x,600);}); location.href='/'; return;}}catch(e){}";
+    script += "    await new Promise(function(r){setTimeout(r,1000);});";
+    script += "  }";
+    script += "  set('Device offline \\u2014 the update may have failed. Power-cycle it, then reload this page.','bad'); stop();";
+    script += "}";
+    script += "function done(){bar.style.width='100%'; wait();}";
+    script += "if(form){form.addEventListener('submit',function(e){";
+    script += "  e.preventDefault(); if(!file.files.length) return;";
+    script += "  btn.disabled=true; btn.classList.add('active','busy'); prog.style.display='block'; set('Uploading\\u2026');";
+    script += "  var fd=new FormData(); fd.append('firmware',file.files[0]);";
+    script += "  var x=new XMLHttpRequest(); x.open('POST','/update'); x.setRequestHeader('Accept','application/json');";
+    script += "  x.upload.onprogress=function(ev){ if(ev.lengthComputable){ var p=Math.round(ev.loaded/ev.total*100); bar.style.width=p+'%'; set('Uploading '+p+'%\\u2026'); } };";
+    script += "  x.onload=function(){ var ok=false; try{ ok=JSON.parse(x.responseText).ok; }catch(e){}";
+    script += "    if(x.status===200&&ok){ done(); } else { set('Update rejected by the device \\u2014 check the .bin and retry.','bad'); stop(); } };";
+    script += "  x.onerror=function(){ done(); };"; // connection often drops as the device reboots mid-response
+    script += "  x.send(fd);";
+    script += "});}";
+    script += "})();";
     AsyncWebServerResponse *resp = request->beginResponse(
       200, "text/html", pageShell("OTA Update", body, script, true)
     );
@@ -1813,7 +1945,9 @@ void setupHttpHandlers() {
             "  for(let i=0;i<60;i++){"
             "    try{"
             "      const r=await fetch('/api/status',{cache:'no-store'});"
-            "      if(r.ok){s.textContent='Online. Redirecting\\u2026'; await new Promise(r=>setTimeout(r,500)); location.href='/'; return;}"
+            // Any HTTP response (even 401 when creds aren't attached to the
+            // fetch) proves the device is back up — treat that as online.
+            "      if(r){s.textContent='Online. Redirecting\\u2026'; await new Promise(r=>setTimeout(r,500)); location.href='/'; return;}"
             "    }catch(e){}"
             "    await new Promise(r=>setTimeout(r,1000));"
             "  }"
@@ -2152,6 +2286,9 @@ void loop() {
 
   // Onboard LED mirrors the output mode (off / on / breathing double-flash)
   statusLedTick();
+
+  // Keep the STA link alive (no-op in portal mode and while connected).
+  wifiSupervisorTick();
 
 #if ENABLE_AWS_IOT
   awsIotLoop();

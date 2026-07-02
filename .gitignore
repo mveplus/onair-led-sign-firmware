@@ -21,6 +21,7 @@ src/secrets.h
 # Binaries can embed compile-time secrets if anyone ever builds with a
 # populated secrets.h, so we keep them out of git entirely. Tagged
 # releases publish artifacts via GitHub Releases instead.
+build/
 build/*.bin
 build/*.elf
 build/*.map

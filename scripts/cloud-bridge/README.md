@@ -48,6 +48,39 @@ At the end you'll get:
 - A **bearer token** stashed at `.onair-bridge-token` (chmod 600)
 - A copy-pasteable smoke test (off → on → breathing → off)
 
+## Reading device state (cloud `verify`)
+
+The same endpoint answers a **`GET ?thing=<thing>`** that returns the
+device's last reported state, read from its AWS IoT **Device Shadow**:
+
+```json
+{ "ok": true, "thing": "onair-test-1", "mode": 2,
+  "reported": { "mode": 2, "output_mode": "breathing", "rssi": -55 }, "ts": 1700000000 }
+```
+
+The firmware reports into the shadow on every `setOutputMode` (see
+`aws_iot.cpp`), so this is the durable last-known state the extension's
+`verify` reconcile compares against when the LAN path is unreachable.
+`POST` still publishes a command; only the HTTP method differs.
+
+The device cert's `OnAirSignPolicy` already allows the shadow topics, and
+`deploy.sh` grants the Lambda `iot:GetThingShadow` (re-run it to upgrade an
+existing role). No new API Gateway route is needed — the `$default` route
+forwards both methods.
+
+### Validate the whole path without the device
+
+`validate-shadow.sh` seeds a shadow (as if the firmware reported it),
+reads it straight from AWS, then reads it back through the Lambda:
+
+```bash
+AWS_PROFILE=onair-iot ./scripts/cloud-bridge/validate-shadow.sh onair-test-1 2
+# → PASS — Lambda returned mode=2 from the shadow.
+```
+
+Unit tests for the Lambda run offline (no AWS): `python3 -m pytest` in this
+directory.
+
 ## Chrome extension wiring
 
 Add three settings the user fills in once:
@@ -79,6 +112,41 @@ async function setOnAir(mode /* 0|1|2 */) {
 
 See the device's `README.md → AWS IoT Core` for the topic shape on the
 firmware side.
+
+## Testing & troubleshooting
+
+Smoke-test the endpoint with `curl` and read the HTTP status — each layer
+fails with a distinct code, so the response tells you where the chain
+broke:
+
+```bash
+TOKEN=$(cat .onair-bridge-token)
+URL=https://<api-id>.execute-api.eu-west-1.amazonaws.com/onair
+curl -sS -w '  [%{http_code}]\n' -X POST "$URL" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"thing":"onair-office","mode":1}'
+```
+
+| Status | Meaning | Fix |
+|---|---|---|
+| `401` | bad / missing bearer token | use the value in `.onair-bridge-token` |
+| `400` | missing/invalid `thing` or `mode` | `mode` must be `0` (off), `1` (on), `2` (breathing) |
+| `403` | `thing` not in `ALLOWED_THINGS` | re-run `deploy.sh` with your real Thing name in `ALLOWED_THINGS` |
+| `200 {"ok":true}` | published to `onair/<thing>/cmd` | if the sign still doesn't move, the issue is device-side — see below |
+
+A **`200` is not proof the sign changed** — it only means the Lambda
+published. The `thing` must name a device actually subscribed to
+`onair/<thing>/cmd` (the firmware logs `subscribed onair/<thing>/cmd` on
+connect). To isolate the device from the bridge, publish straight to the
+topic and watch the device serial:
+
+```bash
+aws iot-data publish --topic 'onair/onair-office/cmd' \
+  --cli-binary-format raw-in-base64-out --payload '{"mode":1}'
+```
+
+If that flips the sign but the `curl` doesn't, the problem is the bridge
+(token/allowlist); if neither does, it's device-side (MQTT subscription).
 
 ## Tearing down
 
