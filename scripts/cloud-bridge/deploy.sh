@@ -69,15 +69,26 @@ else
   aws iam attach-role-policy \
     --role-name "$ROLE_NAME" \
     --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-  PUBLISH_DOC="$(jq -n --arg arn "arn:aws:iot:${AWS_REGION}:${ACCOUNT_ID}:topic/onair/*/cmd" \
-    '{Version:"2012-10-17",Statement:[{Effect:"Allow",Action:"iot:Publish",Resource:$arn}]}')"
-  aws iam put-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-name iot-publish-onair \
-    --policy-document "$PUBLISH_DOC"
   echo "Waiting 10 s for IAM role propagation…"
   sleep 10
 fi
+
+# Always (re)apply the inline IoT policy — least-privilege, and idempotent
+# so re-running deploy upgrades an existing role with new permissions:
+#   iot:Publish        onair/<thing>/cmd   — send commands to devices
+#   iot:GetThingShadow thing/onair-*       — read reported state for the
+#                                            extension's cloud `verify`
+IOT_DOC="$(jq -n \
+  --arg cmd "arn:aws:iot:${AWS_REGION}:${ACCOUNT_ID}:topic/onair/*/cmd" \
+  --arg thing "arn:aws:iot:${AWS_REGION}:${ACCOUNT_ID}:thing/onair-*" \
+  '{Version:"2012-10-17",Statement:[
+     {Effect:"Allow",Action:"iot:Publish",Resource:$cmd},
+     {Effect:"Allow",Action:"iot:GetThingShadow",Resource:$thing}
+   ]}')"
+aws iam put-role-policy \
+  --role-name "$ROLE_NAME" \
+  --policy-name iot-publish-onair \
+  --policy-document "$IOT_DOC"
 ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
 
 # ---- Lambda zip ----------------------------------------------------------
@@ -93,7 +104,13 @@ trap 'rm -rf "$ZIP_DIR"' EXIT
 # Lambda's reserved env list does NOT permit AWS_REGION explicitly; the
 # function picks up the runtime's region automatically, so we omit it here
 # and only ship SHARED_TOKEN + ALLOWED_THINGS.
-ENV_VARS="Variables={SHARED_TOKEN=${SHARED_TOKEN},ALLOWED_THINGS=${ALLOWED_THINGS}}"
+# Build as JSON, not CLI shorthand: shorthand (Variables={K=V,...}) uses
+# commas as the pair separator, so a multi-value ALLOWED_THINGS like
+# "onair-test-1,onair-office" would be misparsed. JSON keeps it intact.
+ENV_VARS="$(jq -n \
+  --arg token "$SHARED_TOKEN" \
+  --arg allowed "$ALLOWED_THINGS" \
+  '{Variables:{SHARED_TOKEN:$token, ALLOWED_THINGS:$allowed}}')"
 
 # ---- Lambda function ----------------------------------------------------
 if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
@@ -150,6 +167,11 @@ fi
 API_ENDPOINT="$(aws apigatewayv2 get-api --api-id "$API_ID" --region "$AWS_REGION" \
   --query ApiEndpoint --output text)"
 
+# Use the first allowlisted thing in the examples below. Hardcoding a name
+# the deployer doesn't actually own makes the smoke test return 200 while
+# nothing happens (it publishes to a topic no device subscribes to).
+EXAMPLE_THING="${ALLOWED_THINGS%%,*}"
+
 # ---- Output --------------------------------------------------------------
 cat <<EOF
 
@@ -164,16 +186,20 @@ Smoke test (off → on → breathing → off):
 
   TOKEN=\$(cat $TOKEN_FILE)
   for m in 0 1 2 0; do
-    curl -fsS -X POST "$API_ENDPOINT" \\
+    curl -fsS -X POST "$API_ENDPOINT/onair" \\
       -H "Authorization: Bearer \$TOKEN" \\
       -H "Content-Type: application/json" \\
-      -d "{\"thing\":\"onair-test-1\",\"mode\":\$m}"
+      -d "{\"thing\":\"$EXAMPLE_THING\",\"mode\":\$m}"
     echo
     sleep 2
   done
 
+A 200 {"ok":true} only means the publish succeeded. If the sign does not
+move, the thing name must match a device actually subscribed to
+onair/<thing>/cmd — not just any name in ALLOWED_THINGS.
+
 Chrome extension settings:
   cloudBase  = $API_ENDPOINT
   cloudToken = (value from $TOKEN_FILE)
-  thing      = onair-test-1
+  thing      = $EXAMPLE_THING
 EOF

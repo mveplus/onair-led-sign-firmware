@@ -15,6 +15,10 @@
 // Topics:
 //   onair/<thing>/state   reported state (published on every setOutputMode)
 //   onair/<thing>/cmd     subscribed; JSON {"mode": 0|1|2} -> setOutputMode
+//   $aws/things/<thing>/shadow/update   Device Shadow reported state —
+//                         durable last-known state the cloud Lambda reads for
+//                         the extension's `verify` reconcile. Needs the cert's
+//                         IoT policy to allow iot:Publish on this shadow topic.
 
 #pragma once
 

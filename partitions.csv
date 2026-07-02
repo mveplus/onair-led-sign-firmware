@@ -1,0 +1,21 @@
+# Custom 4MB partition table for the OnAir sign.
+#
+# The stock "Default 4MB with spiffs" scheme wastes 1.5MB on a SPIFFS
+# filesystem this firmware never uses (config lives in NVS/Preferences,
+# the web UI is compiled into flash). That left only ~1.28MB per OTA app
+# slot — the firmware was sitting at 99%.
+#
+# This layout reclaims the unused SPIFFS into the two OTA app slots:
+# ~1.94MB each (0x1F0000), keeping dual-slot OTA (/update) intact and
+# dropping usage to ~64%. A tiny SPIFFS remains only to satisfy tools.
+#
+# NOTE: a partition-table change cannot be delivered over OTA — it alters
+# the flash layout. Existing devices need a one-time USB re-flash; new
+# devices are unaffected.
+#
+# Name,     Type, SubType,  Offset,   Size
+nvs,        data, nvs,      0x9000,   0x5000
+otadata,    data, ota,      0xe000,   0x2000
+app0,       app,  ota_0,    0x10000,  0x1F0000
+app1,       app,  ota_1,    0x200000, 0x1F0000
+spiffs,     data, spiffs,   0x3F0000, 0x10000
