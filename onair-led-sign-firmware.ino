@@ -822,7 +822,7 @@ String setupPage() {
             "  setTimeout(()=>{location.href='/';},1200);"
             "};"
             "function syncOut(){const sel=document.getElementById('out_sel'); const custom=document.getElementById('out_custom'); const useEl=document.getElementById('usebl'); if(sel&&useEl){sel.disabled=useEl.checked;} if(custom&&useEl){custom.disabled=useEl.checked;}}"
-            "document.addEventListener('DOMContentLoaded',()=>{const useEl=document.getElementById('usebl'); if(useEl){useEl.addEventListener('change',syncOut);} const outSel=document.getElementById('out_sel'); if(outSel){outSel.addEventListener('change',toggleCustomOut); outSel.value=OUT_SEL_DEFAULT;} const ssSel=document.getElementById('ssidSel'); if(ssSel){ssSel.addEventListener('change',toggleManual);} toggleCustomOut(); syncOut(); toggleManual(); rescan();});";
+            "document.addEventListener('DOMContentLoaded',()=>{const useEl=document.getElementById('usebl'); if(useEl){useEl.addEventListener('change',syncOut);} const outSel=document.getElementById('out_sel'); if(outSel){outSel.addEventListener('change',()=>{const u=document.getElementById('usebl'); if(u&&u.checked){u.checked=false; syncOut();} toggleCustomOut();}); outSel.value=OUT_SEL_DEFAULT;} const ssSel=document.getElementById('ssidSel'); if(ssSel){ssSel.addEventListener('change',toggleManual);} toggleCustomOut(); syncOut(); toggleManual(); rescan();});";
   return pageShell("Wi‑Fi Setup", body, script);
 }
 
@@ -1581,8 +1581,8 @@ void setupHttpHandlers() {
             serializeJson(resp, outS);
             request->send(200, "application/json", outS);
 
-            delay(250);
-            ESP.restart();
+            // Defer restart until the response has flushed (see /api/pin).
+            scheduleReboot(300);
             return;
           }
         }
@@ -1775,8 +1775,10 @@ void setupHttpHandlers() {
     String out;
     serializeJson(doc, out);
     request->send(200, "application/json", out);
-    delay(250);
-    ESP.restart();
+    // Defer the restart so AsyncWebServer can flush the response first —
+    // a synchronous ESP.restart() here drops the connection mid-send on
+    // the single-core C6, leaving the client (curl) hanging.
+    scheduleReboot(300);
   });
 
   // Set the onboard LED active level at runtime (active HIGH vs active LOW).
