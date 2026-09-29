@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 230" role="img" aria-label="Holding BOOT: up to 5 seconds the LED blinks slowly and releasing does nothing; from 5 to 15 seconds it blinks fast and releasing resets settings; at 15 seconds a deep reset fires while still held.">
+  <style>
+    text { font: 13px -apple-system, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .ttl, .t-sign { font-weight: 600; }
+    .sub { font-size: 11.5px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
+    .lbl { font-size: 11.5px; }
+    .hd { font-size: 11px; letter-spacing: .08em; }
+    .box { stroke-width: 1.3; } .box.sign { stroke-width: 1.6; } .box.cloud { stroke-width: 1.4; }
+    .e { fill: none; stroke-width: 1.3; } .e.cloud { stroke-width: 1.5; } .e.sign { stroke-width: 1.6; }
+    .e.dash { stroke-dasharray: 5 4; } .e.grid { stroke-width: 1; }
+    .bg{fill:#ffffff}
+    text{fill:#1c2127}
+    .sub,.lbl,.hd{fill:#5b6570}
+    .t-sign{fill:#c8322b}
+    .t-cloud{fill:#2f6fb3}
+    .box{fill:#ffffff;stroke:#1c2127}
+    .box.soft{fill:#f3f5f7;stroke:#d3d9df}
+    .box.sign{fill:#fbe4e2;stroke:#c8322b}
+    .box.cloud{fill:#e3eef9;stroke:#2f6fb3}
+    .e{stroke:#1c2127}
+    .e.cloud{stroke:#2f6fb3}
+    .e.sign{stroke:#c8322b}
+    .e.grid{stroke:#d3d9df}
+    .ah{fill:#1c2127} .ah.cloud{fill:#2f6fb3} .ah.sign{fill:#c8322b}
+    .area{fill:#fbe4e2}
+    .pulse{fill:#c8322b}
+    .seg1{fill:#f3f5f7;stroke:#d3d9df} .seg2{fill:#fbe4e2;stroke:#c8322b} .seg3{fill:#c8322b}
+    @media (prefers-color-scheme: dark) {
+    .bg{fill:#161b21}
+    text{fill:#e3e7eb}
+    .sub,.lbl,.hd{fill:#98a2ac}
+    .t-sign{fill:#ff6b61}
+    .t-cloud{fill:#6ea8ea}
+    .box{fill:#161b21;stroke:#e3e7eb}
+    .box.soft{fill:#1f262d;stroke:#34404b}
+    .box.sign{fill:#3a1f1d;stroke:#ff6b61}
+    .box.cloud{fill:#1a2a3d;stroke:#6ea8ea}
+    .e{stroke:#e3e7eb}
+    .e.cloud{stroke:#6ea8ea}
+    .e.sign{stroke:#ff6b61}
+    .e.grid{stroke:#34404b}
+    .ah{fill:#e3e7eb} .ah.cloud{fill:#6ea8ea} .ah.sign{fill:#ff6b61}
+    .area{fill:#3a1f1d}
+    .pulse{fill:#ff6b61}
+    .seg1{fill:#1f262d;stroke:#34404b} .seg2{fill:#3a1f1d;stroke:#ff6b61} .seg3{fill:#ff6b61}
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah cloud" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah sign" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="900" height="230" rx="10"/>
+  <text x="60" y="28" class="hd">HOLDING BOOT (50 px = 1 s)</text>
+
+  <!-- bar: x 60..860 = 0..16 s -->
+  <rect class="seg1" x="60" y="44" width="250" height="44" rx="4"/>
+  <rect class="seg2" x="310" y="44" width="500" height="44"/>
+  <rect class="seg3" x="810" y="44" width="50" height="44" rx="4"/>
+  <text x="185" y="64" text-anchor="middle" class="ttl">slow blink</text>
+  <text x="185" y="80" text-anchor="middle" class="sub">500 ms</text>
+  <text x="560" y="64" text-anchor="middle" class="ttl">fast blink</text>
+  <text x="560" y="80" text-anchor="middle" class="sub">150 ms · "release now"</text>
+
+  <line class="e" x1="60" y1="88" x2="60" y2="100"/><text x="60" y="114" text-anchor="middle" class="lbl">0 s</text>
+  <line class="e" x1="310" y1="88" x2="310" y2="100"/><text x="310" y="114" text-anchor="middle" class="lbl">5 s</text>
+  <line class="e" x1="560" y1="88" x2="560" y2="100"/><text x="560" y="114" text-anchor="middle" class="lbl">10 s</text>
+  <line class="e" x1="810" y1="88" x2="810" y2="100"/><text x="810" y="114" text-anchor="middle" class="lbl">15 s</text>
+
+  <text x="60" y="146" class="hd">IF RELEASED HERE</text>
+  <text x="185" y="172" text-anchor="middle" class="ttl">nothing is reset</text>
+  <text x="185" y="190" text-anchor="middle" class="sub">sign goes back to its mode</text>
+  <text x="560" y="172" text-anchor="middle" class="ttl">factory reset</text>
+  <text x="560" y="190" text-anchor="middle" class="sub">Wi-Fi, login, output settings</text>
+  <text x="560" y="206" text-anchor="middle" class="sub">sticker password kept</text>
+  <text x="835" y="172" text-anchor="middle" class="t-sign">deep reset</text>
+  <text x="835" y="190" text-anchor="middle" class="sub">fires while held,</text>
+  <text x="835" y="206" text-anchor="middle" class="sub">+ sticker password</text>
+</svg>
