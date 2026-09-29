@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 390" role="img" aria-label="Output level over six seconds for each mode: off stays at 0 percent, on stays at 100 percent, breathing ramps between 5 and 100 percent with a 3 second period. The status LED double-flashes every 1.5 seconds while breathing.">
+  <style>
+    text { font: 13px -apple-system, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .ttl, .t-sign { font-weight: 600; }
+    .sub { font-size: 11.5px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
+    .lbl { font-size: 11.5px; }
+    .hd { font-size: 11px; letter-spacing: .08em; }
+    .box { stroke-width: 1.3; } .box.sign { stroke-width: 1.6; } .box.cloud { stroke-width: 1.4; }
+    .e { fill: none; stroke-width: 1.3; } .e.cloud { stroke-width: 1.5; } .e.sign { stroke-width: 1.6; }
+    .e.dash { stroke-dasharray: 5 4; } .e.grid { stroke-width: 1; }
+    .bg{fill:#ffffff}
+    text{fill:#1c2127}
+    .sub,.lbl,.hd{fill:#5b6570}
+    .t-sign{fill:#c8322b}
+    .t-cloud{fill:#2f6fb3}
+    .box{fill:#ffffff;stroke:#1c2127}
+    .box.soft{fill:#f3f5f7;stroke:#d3d9df}
+    .box.sign{fill:#fbe4e2;stroke:#c8322b}
+    .box.cloud{fill:#e3eef9;stroke:#2f6fb3}
+    .e{stroke:#1c2127}
+    .e.cloud{stroke:#2f6fb3}
+    .e.sign{stroke:#c8322b}
+    .e.grid{stroke:#d3d9df}
+    .ah{fill:#1c2127} .ah.cloud{fill:#2f6fb3} .ah.sign{fill:#c8322b}
+    .area{fill:#fbe4e2}
+    .pulse{fill:#c8322b}
+    .seg1{fill:#f3f5f7;stroke:#d3d9df} .seg2{fill:#fbe4e2;stroke:#c8322b} .seg3{fill:#c8322b}
+    @media (prefers-color-scheme: dark) {
+    .bg{fill:#161b21}
+    text{fill:#e3e7eb}
+    .sub,.lbl,.hd{fill:#98a2ac}
+    .t-sign{fill:#ff6b61}
+    .t-cloud{fill:#6ea8ea}
+    .box{fill:#161b21;stroke:#e3e7eb}
+    .box.soft{fill:#1f262d;stroke:#34404b}
+    .box.sign{fill:#3a1f1d;stroke:#ff6b61}
+    .box.cloud{fill:#1a2a3d;stroke:#6ea8ea}
+    .e{stroke:#e3e7eb}
+    .e.cloud{stroke:#6ea8ea}
+    .e.sign{stroke:#ff6b61}
+    .e.grid{stroke:#34404b}
+    .ah{fill:#e3e7eb} .ah.cloud{fill:#6ea8ea} .ah.sign{fill:#ff6b61}
+    .area{fill:#3a1f1d}
+    .pulse{fill:#ff6b61}
+    .seg1{fill:#1f262d;stroke:#34404b} .seg2{fill:#3a1f1d;stroke:#ff6b61} .seg3{fill:#ff6b61}
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah cloud" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah sign" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="900" height="390" rx="10"/>
+  <text x="160" y="26" class="hd">OUTPUT LEVEL ON PIN_OUT (defaults shown)</text>
+
+  <!-- grid: 6 s over x 160..800 -->
+  <line class="e grid" x1="160.0" y1="40" x2="160.0" y2="355"/>
+  <line class="e grid" x1="266.7" y1="40" x2="266.7" y2="355"/>
+  <line class="e grid" x1="373.3" y1="40" x2="373.3" y2="355"/>
+  <line class="e grid" x1="480.0" y1="40" x2="480.0" y2="355"/>
+  <line class="e grid" x1="586.7" y1="40" x2="586.7" y2="355"/>
+  <line class="e grid" x1="693.3" y1="40" x2="693.3" y2="355"/>
+  <line class="e grid" x1="800.0" y1="40" x2="800.0" y2="355"/>
+
+  <!-- off -->
+  <text x="20" y="72" class="ttl">off</text>
+  <text x="20" y="89" class="sub mono">mode 0</text>
+  <line class="e grid" x1="160" y1="50" x2="800" y2="50"/>
+  <line class="e" x1="160" y1="96" x2="800" y2="96" style="stroke-width:2"/>
+  <text x="810" y="100" class="lbl">0%</text>
+
+  <!-- on -->
+  <text x="20" y="152" class="ttl">on</text>
+  <text x="20" y="169" class="sub mono">mode 1</text>
+  <rect class="area" x="160" y="130" width="640" height="46"/>
+  <line class="e sign" x1="160" y1="130" x2="800" y2="130" style="stroke-width:2"/>
+  <line class="e grid" x1="160" y1="176" x2="800" y2="176"/>
+  <text x="810" y="134" class="lbl">100%</text>
+
+  <!-- breathing: 5%..100%, 3 s period; top 210, bottom 280 -->
+  <text x="20" y="238" class="ttl">breathing</text>
+  <text x="20" y="255" class="sub mono">mode 2 · PWM</text>
+  <polygon class="area" points="160,276.5 320.0,210 480.0,276.5 640.0,210 800,276.5 800,280 160,280"/>
+  <polyline class="e sign" points="160,276.5 320.0,210 480.0,276.5 640.0,210 800,276.5" style="stroke-width:2"/>
+  <line class="e grid" x1="160" y1="280" x2="800" y2="280"/>
+  <text x="810" y="214" class="lbl">max 100%</text>
+  <text x="810" y="280" class="lbl">min 5%</text>
+  <line class="e" x1="160" y1="298" x2="480.0" y2="298" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="320.0" y="314" text-anchor="middle" class="lbl">period 3000 ms (500–10000)</text>
+
+  <!-- status LED while breathing: 120 ms flashes at 0 and 240 ms every 1.5 s -->
+  <text x="20" y="344" class="ttl">status LED</text>
+  <text x="20" y="360" class="sub">while breathing</text>
+  <rect class="pulse" x="160.0" y="332" width="12.8" height="16"/><rect class="pulse" x="185.6" y="332" width="12.8" height="16"/>
+  <rect class="pulse" x="320.0" y="332" width="12.8" height="16"/><rect class="pulse" x="345.6" y="332" width="12.8" height="16"/>
+  <rect class="pulse" x="480.0" y="332" width="12.8" height="16"/><rect class="pulse" x="505.6" y="332" width="12.8" height="16"/>
+  <rect class="pulse" x="640.0" y="332" width="12.8" height="16"/><rect class="pulse" x="665.6" y="332" width="12.8" height="16"/>
+
+  <!-- axis -->
+  <text x="160.0" y="378" text-anchor="middle" class="lbl">0 s</text>
+  <text x="266.7" y="378" text-anchor="middle" class="lbl">1</text>
+  <text x="373.3" y="378" text-anchor="middle" class="lbl">2</text>
+  <text x="480.0" y="378" text-anchor="middle" class="lbl">3</text>
+  <text x="586.7" y="378" text-anchor="middle" class="lbl">4</text>
+  <text x="693.3" y="378" text-anchor="middle" class="lbl">5</text>
+  <text x="800.0" y="378" text-anchor="middle" class="lbl">6 s</text>
+</svg>

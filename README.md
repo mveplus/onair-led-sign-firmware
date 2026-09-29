@@ -21,6 +21,32 @@ This repo contains a single Arduino sketch. Prebuilt binaries are attached to ea
 
 ![Simple web UI](/resources/RUN_UI.png)
 
+## How It Works
+
+### Switching the sign
+
+![Control paths: extension, web UI and BOOT button to the sign](docs/diagrams/control-paths.svg)
+
+The [meeting extension](https://github.com/mveplus/onair-meeting-trigger/) calls the device's local API first (`/api/set`, 1.5 s timeout). If the device isn't reachable on the LAN, it falls back to the cloud bridge. The bridge is a Lambda that publishes `{"mode": N}` to `onair/<thing>/cmd` through AWS IoT Core. Every minute the extension also reads the device's actual mode, from `/api/status` on the LAN or from the Device Shadow through the bridge, and re-sends it if it doesn't match the meeting. The firmware reports its mode to `onair/<thing>/state` and the shadow after every change and on every MQTT connect.
+
+### Power-up
+
+![Power-up flow: output off, BOOT check, Wi-Fi or setup portal, AWS IoT connect](docs/diagrams/power-up.svg)
+
+The sign always starts off. With saved Wi-Fi the device goes straight to connected mode; otherwise it opens the setup access point and captive portal. Saving the setup, 10 minutes in the portal without setup, a BOOT reset, or 15 minutes without Wi-Fi all end in a reboot.
+
+### Output modes
+
+![Output level over time for off, on and breathing, plus the status LED pattern](docs/diagrams/output-modes.svg)
+
+`breathing` ramps the PWM duty between `min_pct` and `max_pct` over `period_ms`. The onboard status LED mirrors the mode (off, solid, or a double flash every 1.5 s) unless the LED itself is the output.
+
+### BOOT button
+
+![BOOT hold timeline: slow blink, fast blink, deep reset](docs/diagrams/boot-button.svg)
+
+Details of what each reset clears are under [Factory Reset](#factory-reset).
+
 ## Project Layout
 
 - `esp32c6-led-sign-firmware.ino` — main firmware sketch
