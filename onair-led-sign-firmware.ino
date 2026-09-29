@@ -1446,7 +1446,12 @@ void startConnectedServices() {
   if (breathMaxPct < 1) breathMaxPct = 1;
   if (breathMaxPct > 100) breathMaxPct = 100;
   if (breathMaxPct <= breathMinPct) breathMaxPct = breathMinPct + 1;
-  setOutputMode(loadInt("mode", MODE_OFF));
+  // Always come up dark. The meeting extension reconciles the real state
+  // (via the Device Shadow, published on MQTT connect) and turns the sign
+  // on only if a meeting is actually in progress. Restoring a saved mode
+  // here lit the sign on power-up whenever the last *local* write had been
+  // ON, because cloud (MQTT cmd) changes never updated the saved value.
+  setOutputMode(MODE_OFF);
 
   // Ensure API token exists once the device is configured and connected.
   String apiToken = loadApiToken();
@@ -1660,7 +1665,6 @@ void setupHttpHandlers() {
         httpStatus = 400;
       } else {
         setOutputMode(state);
-        prefs.putInt("mode", outputMode);
         doc["ok"] = true;
         // Keep the legacy `state` bool for callers that only know on/off
         // (true whenever the output is anything other than OFF), and add
@@ -1735,7 +1739,6 @@ void setupHttpHandlers() {
       }
 
       setOutputMode(nextMode);
-      prefs.putInt("mode", outputMode);
       prefs.putInt("br_period", (int)breathPeriodMs);
       prefs.putInt("br_min", (int)breathMinPct);
       prefs.putInt("br_max", (int)breathMaxPct);
