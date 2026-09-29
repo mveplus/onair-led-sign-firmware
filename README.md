@@ -46,7 +46,7 @@ LED SIGN (+)                                 ESP32-C6 5V
                                                 |
 LED SIGN (-) ----> DRAIN (FGP30N06L) SOURCE <---+---- GND (common)
 
-ESP32-C6 GPIO (Output pin, default GPIO6)
+ESP32-C6 GPIO (Output pin, default GPIO18 / XIAO D10)
   |
   +--[100-220R]--> GATE (FGP30N06L)
   |
@@ -58,7 +58,12 @@ ESP32-C6 GPIO (Output pin, default GPIO6)
 Notes:
 
 - The ESP32‑C6 is 3.3V logic. FGP30N06L is suitable and enhances at 3.3V gate drive; it is a logic‑level N-Channel MOSFET.
-- The gate pulldown (10k) keeps the MOSFET off during boot/reset.
+- **The 10k gate pull-down is required, not optional.** From power-on until
+  `setup()` configures the output pin, the GPIO is not driven: the ROM
+  bootloader runs, then the firmware waits up to ~1.7 s for USB serial. With
+  no pull-down the gate floats during that window and the sign can flicker or
+  glow at power-up. Put it between gate and GND (on either side of the series
+  resistor), so the MOSFET is held off whenever the firmware is not driving it.
 - Use a small series gate resistor (100–220 ohm) to reduce ringing.
 - If your LED sign is inductive, add a flyback diode across the load (anode to MOSFET drain, cathode to +5V).
 - Always share ground between the board, MOSFET, and LED sign power.
@@ -182,6 +187,10 @@ Output modes:
 - `off`
 - `on`
 - `breathing` (PWM; configurable period/min/max)
+
+At power-up the output is always `off`. The mode is not saved across reboots;
+the meeting extension sets it again once the device reports its state (see
+[AWS IoT Core](#aws-iot-core-optional)). Breathing timing is saved.
 
 Breathing defaults:
 
@@ -412,5 +421,9 @@ BLE provisioning is compile‑time gated:
 ## Notes / Troubleshooting
 
 - If the output pin is set to the built‑in LED, the LED polarity setting matters.
+- Sign flickers or glows briefly when plugged in: check the 10k gate pull-down
+  (see [Wiring Diagram](#wiring-diagram-fgp30n06l-same-usb-c-supply)). The
+  firmware drives the pin LOW about 2 s after power-on; before that only the
+  resistor holds the MOSFET off.
 - PWM breathing requires a PWM‑capable GPIO.
 - If you see “OTA disabled in setup mode”, connect the device to Wi‑Fi first.
