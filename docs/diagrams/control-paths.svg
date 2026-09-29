@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" role="img" aria-label="How the sign is switched: the meeting extension tries the device's local HTTP API first and falls back to the cloud bridge, which publishes an MQTT command through AWS IoT Core. The web UI and BOOT button act locally. The firmware drives the sign and status LED and reports its state back to IoT Core.">
+  <style>
+    text { font: 13px -apple-system, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .ttl, .t-sign { font-weight: 600; }
+    .sub { font-size: 11.5px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
+    .lbl { font-size: 11.5px; }
+    .hd { font-size: 11px; letter-spacing: .08em; }
+    .box { stroke-width: 1.3; } .box.sign { stroke-width: 1.6; } .box.cloud { stroke-width: 1.4; }
+    .e { fill: none; stroke-width: 1.3; } .e.cloud { stroke-width: 1.5; } .e.sign { stroke-width: 1.6; }
+    .e.dash { stroke-dasharray: 5 4; } .e.grid { stroke-width: 1; }
+    .bg{fill:#ffffff}
+    text{fill:#1c2127}
+    .sub,.lbl,.hd{fill:#5b6570}
+    .t-sign{fill:#c8322b}
+    .t-cloud{fill:#2f6fb3}
+    .box{fill:#ffffff;stroke:#1c2127}
+    .box.soft{fill:#f3f5f7;stroke:#d3d9df}
+    .box.sign{fill:#fbe4e2;stroke:#c8322b}
+    .box.cloud{fill:#e3eef9;stroke:#2f6fb3}
+    .e{stroke:#1c2127}
+    .e.cloud{stroke:#2f6fb3}
+    .e.sign{stroke:#c8322b}
+    .e.grid{stroke:#d3d9df}
+    .ah{fill:#1c2127} .ah.cloud{fill:#2f6fb3} .ah.sign{fill:#c8322b}
+    .area{fill:#fbe4e2}
+    .pulse{fill:#c8322b}
+    .seg1{fill:#f3f5f7;stroke:#d3d9df} .seg2{fill:#fbe4e2;stroke:#c8322b} .seg3{fill:#c8322b}
+    @media (prefers-color-scheme: dark) {
+    .bg{fill:#161b21}
+    text{fill:#e3e7eb}
+    .sub,.lbl,.hd{fill:#98a2ac}
+    .t-sign{fill:#ff6b61}
+    .t-cloud{fill:#6ea8ea}
+    .box{fill:#161b21;stroke:#e3e7eb}
+    .box.soft{fill:#1f262d;stroke:#34404b}
+    .box.sign{fill:#3a1f1d;stroke:#ff6b61}
+    .box.cloud{fill:#1a2a3d;stroke:#6ea8ea}
+    .e{stroke:#e3e7eb}
+    .e.cloud{stroke:#6ea8ea}
+    .e.sign{stroke:#ff6b61}
+    .e.grid{stroke:#34404b}
+    .ah{fill:#e3e7eb} .ah.cloud{fill:#6ea8ea} .ah.sign{fill:#ff6b61}
+    .area{fill:#3a1f1d}
+    .pulse{fill:#ff6b61}
+    .seg1{fill:#1f262d;stroke:#34404b} .seg2{fill:#3a1f1d;stroke:#ff6b61} .seg3{fill:#ff6b61}
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah cloud" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah sign" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="900" height="470" rx="10"/>
+  <text x="110" y="30" text-anchor="middle" class="hd">WHO ASKS</text>
+  <text x="350" y="30" text-anchor="middle" class="hd">HOW IT TRAVELS</text>
+  <text x="590" y="30" text-anchor="middle" class="hd">DEVICE</text>
+  <text x="805" y="30" text-anchor="middle" class="hd">RESULT</text>
+
+  <!-- inputs -->
+  <rect class="box" x="20" y="98" width="180" height="48" rx="6"/>
+  <text x="110" y="118" text-anchor="middle" class="ttl">Web UI / curl</text>
+  <text x="110" y="135" text-anchor="middle" class="sub">on the same LAN</text>
+
+  <rect class="box" x="20" y="176" width="180" height="96" rx="6"/>
+  <text x="110" y="206" text-anchor="middle" class="ttl">Meeting extension</text>
+  <text x="110" y="224" text-anchor="middle" class="sub">meeting starts / ends</text>
+  <text x="110" y="240" text-anchor="middle" class="sub">+ check every 1 min</text>
+
+  <rect class="box" x="20" y="380" width="180" height="48" rx="6"/>
+  <text x="110" y="400" text-anchor="middle" class="ttl">BOOT button</text>
+  <text x="110" y="417" text-anchor="middle" class="sub">hold for reset</text>
+
+  <!-- transport -->
+  <rect class="box" x="260" y="98" width="180" height="84" rx="6"/>
+  <text x="350" y="122" text-anchor="middle" class="ttl">Local HTTP API</text>
+  <text x="350" y="140" text-anchor="middle" class="sub mono">/api/set · /api/mode</text>
+  <text x="350" y="157" text-anchor="middle" class="sub mono">/api/status</text>
+
+  <rect class="box cloud" x="260" y="224" width="180" height="48" rx="6"/>
+  <text x="350" y="244" text-anchor="middle" class="ttl">Cloud bridge</text>
+  <text x="350" y="261" text-anchor="middle" class="sub">Lambda · POST sets, GET reads</text>
+
+  <rect class="box cloud" x="260" y="300" width="180" height="56" rx="6"/>
+  <text x="350" y="322" text-anchor="middle" class="ttl">AWS IoT Core</text>
+  <text x="350" y="340" text-anchor="middle" class="sub">MQTT · Device Shadow</text>
+
+  <!-- device -->
+  <rect class="box" x="500" y="98" width="180" height="258" rx="8"/>
+  <text x="590" y="122" text-anchor="middle" class="ttl">ESP32-C6 firmware</text>
+  <line class="e grid" x1="516" y1="134" x2="664" y2="134"/>
+  <text x="590" y="222" text-anchor="middle" class="ttl mono">setOutputMode()</text>
+  <text x="590" y="240" text-anchor="middle" class="sub">off · on · breathing</text>
+
+  <!-- outputs -->
+  <rect class="box sign" x="720" y="98" width="165" height="56" rx="6"/>
+  <text x="802" y="120" text-anchor="middle" class="t-sign">ON AIR sign</text>
+  <text x="802" y="138" text-anchor="middle" class="sub">PIN_OUT → MOSFET</text>
+
+  <rect class="box" x="720" y="188" width="165" height="48" rx="6"/>
+  <text x="802" y="208" text-anchor="middle" class="ttl">Status LED</text>
+  <text x="802" y="225" text-anchor="middle" class="sub">mirrors the mode</text>
+
+  <!-- edges: local -->
+  <line class="e" x1="200" y1="122" x2="258" y2="122" marker-end="url(#a)"/>
+  <polyline class="e" points="200,200 230,200 230,160 258,160" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="236" y="192" class="lbl">1 · LAN first</text>
+  <line class="e" x1="440" y1="140" x2="498" y2="140" marker-end="url(#a)"/>
+
+  <!-- edges: cloud -->
+  <line class="e cloud" x1="200" y1="248" x2="258" y2="248" marker-start="url(#ac)" marker-end="url(#ac)"/>
+  <text x="204" y="289" class="lbl t-cloud">2 · else cloud</text>
+  <line class="e cloud" x1="350" y1="272" x2="350" y2="298" marker-start="url(#ac)" marker-end="url(#ac)"/>
+  <line class="e cloud" x1="440" y1="318" x2="498" y2="318" marker-end="url(#ac)"/>
+  <text x="469" y="310" text-anchor="middle" class="lbl t-cloud">cmd</text>
+  <line class="e cloud" x1="498" y1="342" x2="442" y2="342" marker-end="url(#ac)"/>
+  <text x="469" y="372" text-anchor="middle" class="lbl t-cloud">state</text>
+
+  <!-- edge: button -->
+  <polyline class="e" points="200,404 590,404 590,358" marker-end="url(#a)"/>
+
+  <!-- edges: outputs -->
+  <line class="e sign" x1="680" y1="126" x2="718" y2="126" marker-end="url(#as)"/>
+  <line class="e" x1="680" y1="212" x2="718" y2="212" marker-end="url(#a)"/>
+
+  <!-- legend -->
+  <line class="e" x1="720" y1="400" x2="750" y2="400"/><text x="758" y="404" class="lbl">local network</text>
+  <line class="e cloud" x1="720" y1="422" x2="750" y2="422"/><text x="758" y="426" class="lbl t-cloud">internet / AWS</text>
+</svg>
