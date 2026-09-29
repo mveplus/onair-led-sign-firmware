@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 420" role="img" aria-label="Power-up: the output is driven off, a held BOOT button leads to a reset, saved Wi-Fi leads to connected mode with the sign off and AWS IoT connecting, otherwise the setup access point and captive portal start. Resets, saved setup, a 10 minute idle portal, and 15 minutes offline all reboot the device.">
+  <style>
+    text { font: 13px -apple-system, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .ttl, .t-sign { font-weight: 600; }
+    .sub { font-size: 11.5px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
+    .lbl { font-size: 11.5px; }
+    .hd { font-size: 11px; letter-spacing: .08em; }
+    .box { stroke-width: 1.3; } .box.sign { stroke-width: 1.6; } .box.cloud { stroke-width: 1.4; }
+    .e { fill: none; stroke-width: 1.3; } .e.cloud { stroke-width: 1.5; } .e.sign { stroke-width: 1.6; }
+    .e.dash { stroke-dasharray: 5 4; } .e.grid { stroke-width: 1; }
+    .bg{fill:#ffffff}
+    text{fill:#1c2127}
+    .sub,.lbl,.hd{fill:#5b6570}
+    .t-sign{fill:#c8322b}
+    .t-cloud{fill:#2f6fb3}
+    .box{fill:#ffffff;stroke:#1c2127}
+    .box.soft{fill:#f3f5f7;stroke:#d3d9df}
+    .box.sign{fill:#fbe4e2;stroke:#c8322b}
+    .box.cloud{fill:#e3eef9;stroke:#2f6fb3}
+    .e{stroke:#1c2127}
+    .e.cloud{stroke:#2f6fb3}
+    .e.sign{stroke:#c8322b}
+    .e.grid{stroke:#d3d9df}
+    .ah{fill:#1c2127} .ah.cloud{fill:#2f6fb3} .ah.sign{fill:#c8322b}
+    .area{fill:#fbe4e2}
+    .pulse{fill:#c8322b}
+    .seg1{fill:#f3f5f7;stroke:#d3d9df} .seg2{fill:#fbe4e2;stroke:#c8322b} .seg3{fill:#c8322b}
+    @media (prefers-color-scheme: dark) {
+    .bg{fill:#161b21}
+    text{fill:#e3e7eb}
+    .sub,.lbl,.hd{fill:#98a2ac}
+    .t-sign{fill:#ff6b61}
+    .t-cloud{fill:#6ea8ea}
+    .box{fill:#161b21;stroke:#e3e7eb}
+    .box.soft{fill:#1f262d;stroke:#34404b}
+    .box.sign{fill:#3a1f1d;stroke:#ff6b61}
+    .box.cloud{fill:#1a2a3d;stroke:#6ea8ea}
+    .e{stroke:#e3e7eb}
+    .e.cloud{stroke:#6ea8ea}
+    .e.sign{stroke:#ff6b61}
+    .e.grid{stroke:#34404b}
+    .ah{fill:#e3e7eb} .ah.cloud{fill:#6ea8ea} .ah.sign{fill:#ff6b61}
+    .area{fill:#3a1f1d}
+    .pulse{fill:#ff6b61}
+    .seg1{fill:#1f262d;stroke:#34404b} .seg2{fill:#3a1f1d;stroke:#ff6b61} .seg3{fill:#ff6b61}
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah cloud" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah sign" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1000" height="420" rx="10"/>
+
+  <!-- row 1 -->
+  <rect class="box" x="20" y="50" width="160" height="52" rx="6"/>
+  <text x="100" y="72" text-anchor="middle" class="ttl">Power on</text>
+  <text x="100" y="89" text-anchor="middle" class="sub">USB 5 V</text>
+
+  <rect class="box" x="220" y="50" width="160" height="52" rx="6"/>
+  <text x="300" y="72" text-anchor="middle" class="ttl">Output pin LOW</text>
+  <text x="300" y="89" text-anchor="middle" class="sub">sign off</text>
+
+  <rect class="box soft" x="420" y="50" width="160" height="52" rx="6"/>
+  <text x="500" y="72" text-anchor="middle" class="ttl">BOOT held?</text>
+  <text x="500" y="89" text-anchor="middle" class="sub">checked once</text>
+
+  <rect class="box soft" x="620" y="50" width="160" height="52" rx="6"/>
+  <text x="700" y="72" text-anchor="middle" class="ttl">Saved Wi-Fi joins?</text>
+  <text x="700" y="89" text-anchor="middle" class="sub">waits up to 12 s</text>
+
+  <rect class="box" x="820" y="50" width="160" height="52" rx="6"/>
+  <text x="900" y="72" text-anchor="middle" class="ttl">Setup AP + portal</text>
+  <text x="900" y="89" text-anchor="middle" class="sub mono">C6-SETUP-&lt;mac&gt;</text>
+
+  <!-- branch boxes -->
+  <rect class="box" x="420" y="160" width="160" height="52" rx="6"/>
+  <text x="500" y="182" text-anchor="middle" class="ttl">Reset by hold time</text>
+  <text x="500" y="199" text-anchor="middle" class="sub">5 s settings · 15 s deep</text>
+
+  <rect class="box" x="820" y="160" width="160" height="52" rx="6"/>
+  <text x="900" y="182" text-anchor="middle" class="ttl">Config saved</text>
+  <text x="900" y="199" text-anchor="middle" class="sub">or 10 min with no setup</text>
+
+  <rect class="box" x="620" y="160" width="160" height="52" rx="6"/>
+  <text x="700" y="182" text-anchor="middle" class="ttl">Connected mode</text>
+  <text x="700" y="199" text-anchor="middle" class="sub">sign off · HTTP · mDNS</text>
+
+  <rect class="box cloud" x="620" y="250" width="160" height="52" rx="6"/>
+  <text x="700" y="272" text-anchor="middle" class="ttl">AWS IoT connect</text>
+  <text x="700" y="289" text-anchor="middle" class="sub">NTP → TLS → MQTT</text>
+
+  <rect class="box sign" x="620" y="340" width="160" height="60" rx="6"/>
+  <text x="700" y="362" text-anchor="middle" class="t-sign">Running</text>
+  <text x="700" y="378" text-anchor="middle" class="sub">takes commands,</text>
+  <text x="700" y="392" text-anchor="middle" class="sub">reports state</text>
+
+  <rect class="box soft" x="420" y="344" width="160" height="52" rx="6"/>
+  <text x="500" y="366" text-anchor="middle" class="ttl">Wi-Fi drops</text>
+  <text x="500" y="383" text-anchor="middle" class="sub">retry every 10 s</text>
+
+  <!-- main path -->
+  <line class="e" x1="180" y1="76" x2="218" y2="76" marker-end="url(#a)"/>
+  <line class="e" x1="380" y1="76" x2="418" y2="76" marker-end="url(#a)"/>
+  <line class="e" x1="580" y1="76" x2="618" y2="76" marker-end="url(#a)"/>
+  <text x="599" y="68" text-anchor="middle" class="lbl">no</text>
+  <line class="e" x1="780" y1="76" x2="818" y2="76" marker-end="url(#a)"/>
+  <text x="799" y="68" text-anchor="middle" class="lbl">no</text>
+
+  <line class="e" x1="500" y1="102" x2="500" y2="158" marker-end="url(#a)"/>
+  <text x="508" y="134" class="lbl">yes</text>
+  <line class="e" x1="700" y1="102" x2="700" y2="158" marker-end="url(#a)"/>
+  <text x="708" y="134" class="lbl">yes</text>
+  <line class="e" x1="900" y1="102" x2="900" y2="158" marker-end="url(#a)"/>
+
+  <line class="e cloud" x1="700" y1="212" x2="700" y2="248" marker-end="url(#ac)"/>
+  <line class="e cloud" x1="700" y1="302" x2="700" y2="338" marker-end="url(#ac)"/>
+  <text x="708" y="324" class="lbl t-cloud">retry every 5 s</text>
+
+  <line class="e dash" x1="620" y1="370" x2="582" y2="370" marker-end="url(#a)"/>
+  <text x="601" y="362" text-anchor="middle" class="lbl">link</text>
+
+  <!-- reboot bus -->
+  <polyline class="e dash" points="980,186 992,186 992,24 100,24 100,48" marker-end="url(#a)"/>
+  <text x="546" y="18" text-anchor="middle" class="lbl">reboot</text>
+  <polyline class="e dash" points="420,186 100,186 100,104" marker-end="url(#a)"/>
+  <text x="260" y="178" text-anchor="middle" class="lbl">reboot</text>
+  <polyline class="e dash" points="420,370 100,370 100,186"/>
+  <text x="260" y="362" text-anchor="middle" class="lbl">still down after 15 min → reboot</text>
+</svg>
