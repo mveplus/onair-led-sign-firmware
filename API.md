@@ -38,6 +38,10 @@ GET /api/status
   - `state` (bool, true when output is ON)
   - `rssi` (int, only in STA mode)
 
+Output mode is not saved across reboots: the device always powers up
+OFF and waits for the meeting extension to reconcile it. Breathing
+timing (`period_ms`, `min_pct`, `max_pct`) is saved.
+
 GET /api/set?state=0|1
 - Sets output mode to OFF (0) or ON (1).
 - Response fields: `ok`, `state`.
