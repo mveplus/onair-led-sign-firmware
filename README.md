@@ -23,6 +23,12 @@ This repo contains a single Arduino sketch. Prebuilt binaries are attached to ea
 
 ## How It Works
 
+An interactive slideshow walking through every component, with live
+simulations of the output modes, BOOT resets, power-up flow and control
+paths, is published at
+**<https://mveplus.github.io/onair-led-sign-firmware/>** (source in
+[`site/`](site/); open `site/index.html` locally, no build needed).
+
 ### Switching the sign
 
 ![Control paths: extension, web UI and BOOT button to the sign](docs/diagrams/control-paths.svg)
