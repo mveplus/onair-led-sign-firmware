@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>On-Air Sign Internals</title>
+<meta name="description" content="Interactive slideshow explaining how the ESP32-C6 On-Air LED sign firmware, its cloud bridge and its build pipeline work.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="#/title"><span class="brand-dot"></span>ON AIR · internals</a>
+  <span class="chapter" id="chapter"></span>
+  <button class="icon-btn" id="btn-overview" title="All slides (O)" aria-label="All slides">▦</button>
+</header>
+
+<main id="deck">
+
+<!-- ============================================================ 1 -->
+<section class="slide" id="title" data-chapter="Intro" data-title="On-Air sign">
+  <div class="hero">
+    <div>
+      <p class="kicker">ESP32-C6 firmware · AWS IoT bridge · Chrome extension</p>
+      <h1>How the On-Air sign works</h1>
+      <p class="lead">A walk through the system, from the reason it exists down to the code, with live simulations of the firmware's behaviour.</p>
+      <p class="hint">Use <kbd>←</kbd> <kbd>→</kbd> or swipe to move, <kbd>O</kbd> for an overview. Click the sign.</p>
+    </div>
+    <button class="sign big" id="hero-sign" aria-label="Toggle the demo sign"><span>ON AIR</span></button>
+  </div>
+</section>
+
+<!-- ============================================================ 2 -->
+<section class="slide" id="idea" data-chapter="Intro" data-title="The idea">
+  <h2>The idea</h2>
+  <div class="cols">
+    <div>
+      <p class="lead">When you join a video call, a neon sign outside the room lights up. When the call ends, it goes dark. Nobody has to remember to flip a switch.</p>
+      <ul class="points">
+        <li><b>Detection</b> happens in the browser. The <a href="https://github.com/mveplus/onair-meeting-trigger/">On-Air Meeting Trigger</a> extension notices a meeting tab.</li>
+        <li><b>Switching</b> happens on a small ESP32-C6 board wired to the sign's power through a MOSFET.</li>
+        <li><b>Reachability</b> works both at home (direct HTTP on the LAN) and away (through AWS IoT Core).</li>
+        <li><b>Safety</b> comes first: the sign always powers up OFF, and no cloud secrets ship in the source or the binaries.</li>
+      </ul>
+    </div>
+    <figure class="photo">
+      <img src="img/monkey-onair.jpg" alt="Lit red ON AIR neon sign on a shelf" loading="lazy">
+      <figcaption>The real thing: a 5 V USB neon sign switched by the board.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================================================ 3 -->
+<section class="slide" id="big-picture" data-chapter="Intro" data-title="Big picture">
+  <h2>The big picture</h2>
+  <p class="sub">Four pieces, two network paths. Click a component to see its role.</p>
+  <div class="cols wide-left">
+    <div class="arch" id="arch">
+      <button class="arch-node n-ext" data-k="ext"><b>Chrome extension</b><small>detects meetings</small></button>
+      <button class="arch-node n-dev" data-k="dev"><b>ESP32-C6 sign</b><small>this firmware</small></button>
+      <button class="arch-node n-lam" data-k="lam"><b>Cloud bridge</b><small>API Gateway + Lambda</small></button>
+      <button class="arch-node n-iot" data-k="iot"><b>AWS IoT Core</b><small>MQTT broker + Shadow</small></button>
+      <svg class="arch-lines" viewBox="0 0 600 340" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M110 230 C110 320 490 320 490 230" class="ln lan"/>
+        <path d="M120 150 C120 80 170 70 220 70" class="ln cloud"/>
+        <path d="M380 70 L420 70" class="ln cloud"/>
+        <path d="M490 105 L490 150" class="ln cloud"/>
+      </svg>
+      <span class="arch-tag t-lan">Home LAN · HTTP</span>
+      <span class="arch-tag t-cloud">Internet · HTTPS → MQTT/TLS</span>
+    </div>
+    <div class="card" id="arch-info">
+      <h3>Pick a component</h3>
+      <p>Each of the four boxes is a separate piece of software. Only the device firmware lives in this repository's main sketch; the bridge lives in <code>scripts/cloud-bridge/</code>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 4 -->
+<section class="slide" id="control-paths" data-chapter="Intro" data-title="Control paths">
+  <h2>How a command reaches the sign</h2>
+  <p class="sub">Choose a scenario and step through it. The dot shows each message in flight.</p>
+  <div class="scenario-bar" id="flow-scenarios">
+    <button data-s="lan" class="chip active">Meeting starts at home</button>
+    <button data-s="cloud" class="chip">Meeting starts, LAN unreachable</button>
+    <button data-s="verify" class="chip">Minute check finds drift</button>
+    <button data-s="reconnect" class="chip">Device reconnects</button>
+  </div>
+  <div class="cols wide-left">
+    <svg class="flow" id="flow" viewBox="0 0 900 400" role="img" aria-label="Message flow diagram">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="arrowhead"/></marker>
+      </defs>
+      <path id="p-lan"     class="fp" d="M110 250 C110 370 790 370 790 250"/>
+      <path id="p-ext-lam" class="fp" d="M150 170 C150 110 210 75 260 75"/>
+      <path id="p-lam-iot" class="fp" d="M400 75 L500 75"/>
+      <path id="p-iot-dev" class="fp" d="M640 75 C760 75 790 120 790 170"/>
+      <path id="p-iot-sh"  class="fp" d="M570 110 L570 170"/>
+      <path id="p-lam-sh"  class="fp" d="M360 110 C380 205 440 205 500 205"/>
+      <g class="fn" id="n-ext"><rect x="30" y="170" width="160" height="80" rx="10"/><text x="110" y="205">Extension</text><text x="110" y="226" class="small">browser</text></g>
+      <g class="fn" id="n-dev"><rect x="710" y="170" width="160" height="80" rx="10"/><text x="790" y="205">Sign</text><text x="790" y="226" class="small">ESP32-C6</text></g>
+      <g class="fn" id="n-lam"><rect x="260" y="40" width="140" height="70" rx="10"/><text x="330" y="72">Lambda</text><text x="330" y="92" class="small">API Gateway</text></g>
+      <g class="fn" id="n-iot"><rect x="500" y="40" width="140" height="70" rx="10"/><text x="570" y="72">IoT Core</text><text x="570" y="92" class="small">MQTT broker</text></g>
+      <g class="fn" id="n-sh"><rect x="500" y="170" width="140" height="70" rx="10"/><text x="570" y="202">Shadow</text><text x="570" y="222" class="small">last reported</text></g>
+      <text x="450" y="352" class="lane">home LAN</text>
+      <circle id="packet" r="9" cx="-50" cy="-50"/>
+      <g id="flow-x" class="flow-x" opacity="0"><line x1="435" y1="320" x2="465" y2="350"/><line x1="465" y1="320" x2="435" y2="350"/></g>
+    </svg>
+    <div class="card stepper">
+      <ol id="flow-steps" class="steps"></ol>
+      <div class="row">
+        <button class="btn" id="flow-prev">◀ Back</button>
+        <button class="btn primary" id="flow-next">Next ▶</button>
+        <button class="btn ghost" id="flow-play">Play all</button>
+      </div>
+      <div class="mini-sign-row"><span>Sign:</span><span class="sign tiny" id="flow-sign"><span>ON AIR</span></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 5 -->
+<section class="slide" id="hardware" data-chapter="Hardware" data-title="Hardware & wiring">
+  <h2>Hardware: a low-side MOSFET switch</h2>
+  <p class="sub">The sign and the board share one USB-C 5 V supply. Hover or tap a part.</p>
+  <div class="cols wide-left">
+    <svg class="schematic" id="schematic" viewBox="0 0 640 380" role="img" aria-label="Wiring schematic">
+      <g class="wire"><path d="M60 40 H560"/><path d="M160 40 V90"/><path d="M500 40 V190"/>
+        <path d="M160 150 V200"/><path d="M160 260 V320 H560"/><path d="M500 310 V320"/>
+        <path d="M380 230 H420"/><path d="M300 230 V270"/><path d="M300 310 V320"/><path d="M200 230 H340"/></g>
+      <text x="40" y="34" class="lbl">+5V</text><text x="566" y="324" class="lbl">GND</text>
+      <g class="part" data-p="sign"><rect x="110" y="90" width="100" height="60" rx="8"/><text x="160" y="126">LED sign</text></g>
+      <g class="part" data-p="fet"><rect x="120" y="200" width="80" height="60" rx="8"/><text x="160" y="226">MOSFET</text><text x="160" y="244" class="small">FGP30N06L</text></g>
+      <g class="part" data-p="rg"><rect x="340" y="218" width="40" height="24" rx="4"/><text x="360" y="210" class="small">100–220 Ω</text></g>
+      <g class="part" data-p="rpd"><rect x="288" y="270" width="24" height="40" rx="4"/><text x="250" y="295" class="small">10 kΩ</text></g>
+      <g class="part" data-p="mcu"><rect x="420" y="190" width="160" height="120" rx="10"/><text x="500" y="230">ESP32-C6</text><text x="500" y="252" class="small">GPIO18 (D10) → gate</text><text x="500" y="272" class="small">GPIO9 BOOT · LED</text></g>
+      <text x="154" y="186" class="small pin" text-anchor="end">drain</text><text x="154" y="282" class="small pin" text-anchor="end">source</text><text x="206" y="222" class="small pin" text-anchor="start">gate</text>
+    </svg>
+    <div class="card" id="hw-info">
+      <h3>Why this circuit</h3>
+      <p>The ESP32 can't power a sign from a 3.3 V pin. Instead it drives the gate of a logic-level N-channel MOSFET that sits between the sign's negative lead and ground. Gate high: current flows and the sign lights. Gate low: the sign is dark. PWM on the gate gives the "breathing" effect.</p>
+      <p class="muted">Supported boards: Seeed XIAO ESP32-C6 (default) and DFRobot Beetle ESP32-C6. Both are built in CI.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 6 -->
+<section class="slide" id="firmware-shape" data-chapter="Firmware" data-title="Firmware shape">
+  <h2>Firmware shape: one sketch, a few cooperating ticks</h2>
+  <div class="cols">
+    <div>
+      <div class="files">
+        <div class="file"><code>onair-led-sign-firmware.ino</code><span>~2300 lines: output, portal, HTTP API, OTA, reset, Wi-Fi</span></div>
+        <div class="file"><code>aws_iot.{h,cpp}</code><span>MQTT/TLS client, topics, Device Shadow</span></div>
+        <div class="file"><code>aws_provisioning.{h,cpp}</code><span>Fleet Provisioning by Claim</span></div>
+        <div class="file"><code>partitions.csv</code><span>custom 4 MB layout with two OTA slots</span></div>
+        <div class="file"><code>scripts/cloud-bridge/</code><span>Python Lambda + deploy and test scripts</span></div>
+      </div>
+      <p class="muted">No RTOS tasks of its own. HTTP runs in ESPAsyncWebServer's task; everything else is a non-blocking <em>tick</em> called from <code>loop()</code> every ~5 ms.</p>
+    </div>
+    <div class="card">
+      <h3><code>loop()</code>: click a line</h3>
+      <ol class="loop-list" id="loop-list">
+        <li data-i="0"><code>if (rebootPending …) ESP.restart()</code></li>
+        <li data-i="1"><code>handleSerialStickerCommand()</code></li>
+        <li data-i="2"><code>if (portalMode) dnsServer…; timeout</code></li>
+        <li data-i="3"><code>breathingTick()</code></li>
+        <li data-i="4"><code>handleResetLongPress()</code></li>
+        <li data-i="5"><code>statusLedTick()</code></li>
+        <li data-i="6"><code>wifiSupervisorTick()</code></li>
+        <li data-i="7"><code>awsIotLoop()</code></li>
+        <li data-i="8"><code>delay(5)</code></li>
+      </ol>
+      <p id="loop-info" class="info-box">Each tick checks <code>millis()</code> and returns quickly, so one slow subsystem never freezes the others.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 7 -->
+<section class="slide" id="power-up" data-chapter="Firmware" data-title="Power-up walkthrough">
+  <h2>Power-up: walk the state machine</h2>
+  <p class="sub">Make the choices the real world would make and see where the device ends up.</p>
+  <div class="cols wide-right">
+    <ol class="trail" id="boot-trail"></ol>
+    <div class="card boot-card">
+      <div class="boot-head"><h3 id="boot-title"></h3><span class="sign tiny" id="boot-sign"><span>ON AIR</span></span></div>
+      <p id="boot-text"></p>
+      <pre class="code" id="boot-code"></pre>
+      <div class="row wrap" id="boot-choices"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 8 -->
+<section class="slide" id="setup-portal" data-chapter="Firmware" data-title="Setup portal & sticker">
+  <h2>First-time setup: captive portal and Wi-Fi sticker</h2>
+  <div class="cols">
+    <div>
+      <ul class="points">
+        <li>No saved Wi-Fi: the board starts an <b>AP+STA</b> access point <code>C6-SETUP-&lt;MAC12&gt;</code> at <code>192.168.4.1</code> and answers <em>every</em> DNS query with its own IP. Phones then pop up the captive portal by themselves.</li>
+        <li>The AP password is <b>unique per device</b>: three words from a 48-word list plus 4 random characters. It's stored in the <code>mfg</code> NVS namespace and survives a normal factory reset, so the printed sticker stays valid.</li>
+        <li><code>scripts/print-sticker.py</code> reads it over USB (<code>GET-STICKER</code>) and prints a Wi-Fi-join QR code. After the first successful Wi-Fi join the device sets <code>stk_lock</code>, so a stolen device won't reveal it over USB.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Try the generator</h3>
+      <p class="muted">Uses the firmware's real word list.</p>
+      <dl class="kv">
+        <dt>SSID</dt><dd><code id="gen-ssid"></code></dd>
+        <dt>Password</dt><dd><code id="gen-pass" class="big-code"></code></dd>
+        <dt>QR payload</dt><dd><code id="gen-qr" class="wrapcode"></code></dd>
+        <dt>Entropy</dt><dd>3 × log₂48 + 4 × log₂36 ≈ <b>37.4 bits</b></dd>
+      </dl>
+      <button class="btn primary" id="gen-btn">Generate another device</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 9 -->
+<section class="slide" id="output-modes" data-chapter="Firmware" data-title="Output modes">
+  <h2>Output modes: off, on, breathing</h2>
+  <p class="sub">This simulator runs the same integer maths as <code>breathingTick()</code> and <code>statusLedTick()</code>.</p>
+  <div class="cols wide-left">
+    <div class="sim">
+      <div class="sim-top">
+        <button class="sign big" id="sim-sign" tabindex="-1" aria-hidden="true"><span>ON AIR</span></button>
+        <div class="led-box"><span class="led" id="sim-led"></span><small>onboard status LED</small></div>
+      </div>
+      <canvas id="sim-graph" height="160" aria-label="Output level over time"></canvas>
+      <div class="readout"><span>duty <b id="sim-pct">0</b>%</span><span>PWM <b id="sim-duty">0</b>/1023</span><span>1 kHz · 10-bit</span></div>
+    </div>
+    <div class="card">
+      <div class="seg" id="sim-modes" role="group" aria-label="Output mode">
+        <button data-m="0" class="active">off</button><button data-m="1">on</button><button data-m="2">breathing</button>
+      </div>
+      <label class="slider">period_ms <output id="o-period">3000</output><input type="range" id="s-period" min="500" max="10000" step="100" value="3000"></label>
+      <label class="slider">min_pct <output id="o-min">5</output><input type="range" id="s-min" min="1" max="99" value="5"></label>
+      <label class="slider">max_pct <output id="o-max">100</output><input type="range" id="s-max" min="1" max="100" value="100"></label>
+      <p class="muted small-text" id="sim-clamp">Same rule as <code>/api/mode</code>: max ≤ min is rejected with HTTP 400.</p>
+      <div class="cmds">
+        <div><small>HTTP</small><code id="sim-http"></code></div>
+        <div><small>MQTT cmd</small><code id="sim-mqtt"></code></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 10 -->
+<section class="slide" id="breathing-code" data-chapter="Firmware" data-title="Inside setOutputMode">
+  <h2>Inside <code>setOutputMode()</code></h2>
+  <div class="cols">
+    <pre class="code tall"><span class="c">// every path ends up here: HTTP, MQTT, BOOT restore</span>
+void setOutputMode(int mode) {
+  if (mode &lt; MODE_OFF || mode &gt; MODE_BREATHING) mode = MODE_OFF;
+  outputMode = mode;
+  if (outputMode == MODE_BREATHING) {
+    ensurePwmAttached();          <span class="c">// ledcAttach 1 kHz, 10-bit</span>
+    breathPhaseStart = millis();
+  }
+  if (outputMode == MODE_ON)       outputWrite(true);
+  else if (outputMode == MODE_OFF) outputWrite(false);
+#if ENABLE_AWS_IOT
+  awsIotPublishState(outputMode); <span class="c">// state topic + shadow</span>
+#endif
+}
+
+<span class="c">// breathingTick(): a triangle wave</span>
+elapsed = (millis() - breathPhaseStart) % period;
+if (elapsed &lt; half) pct = min + span * elapsed / half;
+else                pct = max - span * (elapsed - half) / half;</pre>
+    <div>
+      <ul class="points">
+        <li><b>One funnel.</b> The local API, the MQTT <code>cmd</code> topic and the BOOT-button restore all call <code>setOutputMode()</code>. That's why every change is reported to the cloud, whichever path caused it.</li>
+        <li><b>Invalid input fails safe.</b> An unknown mode number becomes OFF.</li>
+        <li><b>The mode isn't persisted.</b> Breathing timing is saved to NVS; the on/off mode is not. A saved "ON" used to light the sign after a power cut even with no meeting in progress, because MQTT commands never updated the saved value.</li>
+        <li><b>Polarity aware.</b> If the output is the onboard LED and it's active-low, the PWM duty is inverted.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 11 -->
+<section class="slide" id="http-api" data-chapter="Firmware" data-title="HTTP API & auth">
+  <h2>Local HTTP API and authentication</h2>
+  <div class="cols">
+    <div>
+      <ul class="points">
+        <li>An <b>API token</b> is generated on the first successful Wi-Fi join: 12 hex digits of MAC plus 64 bits from <code>esp_random()</code>. It's shown on the device's web page.</li>
+        <li><code>ensureApiAuth()</code> accepts the token as <code>X-API-Token</code>, <code>Authorization: Bearer</code> or <code>?token=</code>, and falls back to HTTP Basic (<code>admin</code>/<code>esp32c6</code> until you change it).</li>
+        <li>mDNS advertises <code>http://&lt;hostname&gt;.local/</code>.</li>
+        <li>Reboots from HTTP handlers are <em>deferred</em> (<code>scheduleReboot()</code>) so the response, or a 303 redirect, reaches the browser first.</li>
+      </ul>
+      <img class="shot" src="img/run-ui.png" alt="Connected-mode web UI of the device" loading="lazy">
+    </div>
+    <div class="card">
+      <h3>Request builder</h3>
+      <label class="field">Endpoint
+        <select id="api-ep">
+          <option value="status">GET /api/status</option>
+          <option value="on">GET /api/set?state=1</option>
+          <option value="off">GET /api/set?state=0</option>
+          <option value="breath">GET /api/mode?mode=breathing…</option>
+          <option value="config">GET /api/config</option>
+          <option value="aws">GET /api/aws/status</option>
+          <option value="reboot">POST /api/reboot</option>
+        </select>
+      </label>
+      <label class="field">Auth
+        <select id="api-auth">
+          <option value="hdr">X-API-Token header</option>
+          <option value="bearer">Authorization: Bearer</option>
+          <option value="query">?token= query</option>
+          <option value="basic">HTTP Basic</option>
+          <option value="none">none</option>
+        </select>
+      </label>
+      <pre class="code" id="api-curl"></pre>
+      <small class="muted">Example response</small>
+      <pre class="code" id="api-resp"></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 12 -->
+<section class="slide" id="boot-button" data-chapter="Firmware" data-title="BOOT button resets">
+  <h2>BOOT button: two reset levels</h2>
+  <p class="sub">Press and hold the button below (mouse, touch or <kbd>Space</kbd>). Watch the LED and see what gets wiped.</p>
+  <div class="cols">
+    <div class="card center">
+      <div class="boot-sim">
+        <span class="led huge" id="bb-led"></span>
+        <button class="boot-btn" id="bb-btn">BOOT<small>hold me</small></button>
+      </div>
+      <div class="timeline">
+        <div class="tl-fill" id="bb-fill"></div>
+        <span class="tl-mark" style="left:25%">5 s</span>
+        <span class="tl-mark" style="left:75%">15 s</span>
+      </div>
+      <p class="bb-status" id="bb-status">Idle. Output mode is kept while you hold.</p>
+      <label class="check"><input type="checkbox" id="bb-fast" checked> 3× speed (for demos)</label>
+    </div>
+    <div>
+      <div class="ns-grid">
+        <div class="ns" id="ns-cfg"><b>cfg</b><small>Wi-Fi, hostname, auth, API token, pins, breathing</small></div>
+        <div class="ns" id="ns-mfg"><b>mfg</b><small>Setup-AP password, <code>stk_lock</code></small></div>
+        <div class="ns" id="ns-aws"><b>aws_iot</b><small>endpoint, Thing, cert, key, CA</small></div>
+      </div>
+      <table class="tbl">
+        <tr><th>Hold</th><th>LED</th><th>Result</th></tr>
+        <tr><td>&lt; 5 s</td><td>slow blink, 500 ms</td><td>nothing; mode restored</td></tr>
+        <tr><td>5–15 s, then release</td><td>fast blink, 150 ms</td><td>clears <code>cfg</code></td></tr>
+        <tr><td>reach 15 s</td><td>solid</td><td>erases <b>all</b> NVS at once</td></tr>
+      </table>
+      <p class="note">The 5 s reset keeps the sticker (<code>mfg</code>) and the AWS identity (<code>aws_iot</code>). The 15 s reset runs <code>nvs_flash_erase()</code>: every namespace, including the per-device private key, is gone, as if the board were freshly flashed.</p>
+      <p class="muted">A 60 ms release debounce stops one noisy read from restarting the timer. The same check runs during boot and during the 12 s Wi-Fi connect wait. Serial equivalents: <code>RESET-CFG</code>, <code>RESET-ALL</code>, <code>RESET-MFG</code>; HTTP: <code>POST /api/factory-reset[?deep=1]</code>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 13 -->
+<section class="slide" id="wifi" data-chapter="Firmware" data-title="Wi-Fi resilience">
+  <h2>Staying online without a human</h2>
+  <p class="sub">The sign sits on a shelf for months. Drag the slider to see what the firmware does as an outage gets longer.</p>
+  <div class="cols">
+    <div class="card">
+      <label class="slider">Minutes offline <output id="o-off">0</output><input type="range" id="s-off" min="0" max="16" step="0.25" value="0"></label>
+      <div class="wifi-bar"><div id="wifi-fill"></div><span style="left:93.75%">15 min</span></div>
+      <p class="info-box" id="wifi-text"></p>
+    </div>
+    <div>
+      <ol class="layers">
+        <li><b>Layer 1: tell the core to try harder.</b> <code>setAutoReconnect(true)</code>, <code>setSleep(false)</code> (mains-powered, so modem power-save that misses beacons buys nothing), and <code>persistent(false)</code> so reconnects don't wear out NVS.</li>
+        <li><b>Layer 2: active supervisor.</b> Every 10 s while down, <code>wifiSupervisorTick()</code> runs <code>WiFi.disconnect()</code> + <code>WiFi.begin()</code> again. That revives the supplicant even after the core's own retries have given up.</li>
+        <li><b>Layer 3: reboot.</b> After 15 minutes offline, <code>ESP.restart()</code> clears any stuck Wi-Fi/lwIP state.</li>
+        <li><b>Portal timeout.</b> A setup AP nobody uses reboots after 10 minutes and tries the saved network again, which covers a router that was simply down at boot.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 14 -->
+<section class="slide" id="aws-iot" data-chapter="Cloud" data-title="AWS IoT client">
+  <h2>AWS IoT Core: optional, credentials only at runtime</h2>
+  <div class="cols">
+    <div>
+      <ul class="points">
+        <li>The firmware reads <code>{endpoint, thing, root_ca, cert, key}</code> from the <code>aws_iot</code> NVS namespace. If any of them is missing, the module stays idle.</li>
+        <li>The only certificate compiled in is the public <b>Amazon Root CA 1</b>, and it can be overridden at runtime.</li>
+        <li><b>NTP before TLS.</b> The chip has no RTC; at the 1970 epoch every certificate looks "not yet valid". It waits up to 8 s for <code>pool.ntp.org</code>.</li>
+        <li>Mutual TLS to port 8883, 60 s keep-alive, reconnect every 5 s on failure. <code>rc = -4</code> means TLS succeeded but AWS dropped the link: wrong region or IoT policy.</li>
+        <li>Build with <code>ENABLE_AWS_IOT=0</code> for a LAN-only firmware without the module.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Topics</h3>
+      <div class="topic"><span class="dir in">cloud → device</span><code>onair/&lt;thing&gt;/cmd</code><pre class="code">{"mode": 1}</pre></div>
+      <div class="topic"><span class="dir out">device → cloud</span><code>onair/&lt;thing&gt;/state</code><pre class="code">{"mode":1,"thing":"onair-…","uptime_ms":…,"rssi":-55}</pre></div>
+      <div class="topic"><span class="dir out">device → shadow</span><code>$aws/things/&lt;thing&gt;/shadow/update</code><pre class="code">{"state":{"reported":{"mode":1,"output_mode":"on",…}}}</pre></div>
+      <p class="muted">Both are published on every <code>setOutputMode()</code> <em>and</em> on every MQTT (re)connect, so the cloud learns about the "always boots OFF" reset too.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 15 -->
+<section class="slide" id="provisioning" data-chapter="Cloud" data-title="Provisioning paths">
+  <h2>Getting a device identity onto the board</h2>
+  <div class="tabs" id="prov-tabs">
+    <button class="chip active" data-t="paste">1 · Paste credentials</button>
+    <button class="chip" data-t="claim">2 · Fleet Provisioning by Claim</button>
+    <button class="chip" data-t="backend">3 · Custom backend</button>
+  </div>
+  <div class="tab-body" data-t="paste">
+    <div class="cols">
+      <div><p class="lead">The simplest option: create a certificate yourself and paste it in once.</p>
+        <pre class="code">aws iot create-keys-and-certificate --set-as-active …
+# then in the portal, or:
+POST /api/aws/provision
+{"endpoint":"xxxx-ats.iot.eu-west-1.amazonaws.com",
+ "thing_name":"onair-office", "cert":"-----BEGIN…", "key":"-----BEGIN…"}</pre>
+        <p class="muted"><code>scripts/provision-device.sh</code> automates this from a workstation.</p></div>
+      <div class="card"><p>The values go straight into NVS and <code>awsIotSetup()</code> runs again. <code>GET /api/aws/status</code> reports <code>{provisioned, connected, last_rc}</code> and never echoes PEM data.</p></div>
+    </div>
+  </div>
+  <div class="tab-body" data-t="claim" hidden>
+    <div class="cols">
+      <div class="card stepper">
+        <ol class="steps" id="claim-steps">
+          <li>Connect with the shared, low-privilege <b>claim</b> cert (NTP sync first).</li>
+          <li>Publish <code>{}</code> to <code>$aws/certificates/create/json</code>.</li>
+          <li><code>…/create/json/accepted</code> returns a new cert, key and <code>certificateOwnershipToken</code> (15 s timeout).</li>
+          <li>Publish <code>{certificateOwnershipToken, parameters:{SerialNumber:&lt;mac12&gt;}}</code> to <code>$aws/provisioning-templates/&lt;t&gt;/provision/json</code>.</li>
+          <li><code>…/provision/json/accepted</code> returns the <code>thingName</code>.</li>
+          <li><code>awsIotProvision()</code> saves the <em>new</em> identity. The claim cert is thrown away and never written to NVS.</li>
+        </ol>
+        <div class="row"><button class="btn" data-step="-1">◀</button><button class="btn primary" data-step="1">Next ▶</button></div>
+      </div>
+      <div><p class="lead">Many devices can share one claim cert. Each one trades it for its own identity on first use.</p><p class="muted">Runs synchronously inside the HTTP handler (<code>POST /api/aws/claim</code>, ~10–30 s). Results are reported as <code>AwsClaimResult</code>: <code>OK, BAD_INPUT, NO_WIFI, NTP_FAILED, CONNECT_FAILED, TIMEOUT, REJECTED…</code></p></div>
+    </div>
+  </div>
+  <div class="tab-body" data-t="backend" hidden>
+    <div class="cols">
+      <div><p class="lead">Your own HTTPS service issues per-device credentials.</p><p>The contract is in <code>docs/bootstrap-backend.md</code>. The device side isn't wired up yet (deferred past v1).</p></div>
+      <div class="card"><p>All three paths write the same NVS record, so the MQTT client in <code>aws_iot.cpp</code> doesn't care how the identity got there.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 16 -->
+<section class="slide" id="cloud-bridge" data-chapter="Cloud" data-title="Cloud bridge Lambda">
+  <h2>The cloud bridge: one Lambda, two verbs</h2>
+  <div class="cols">
+    <pre class="code tall"><span class="c"># scripts/cloud-bridge/lambda_function.py</span>
+def lambda_handler(event, _ctx):
+    if method == "OPTIONS": return 204          <span class="c"># CORS preflight</span>
+    if auth != f"Bearer {SHARED_TOKEN}": return 401
+    return handle_get(event) if method == "GET" \
+      else handle_post(event)
+
+<span class="c"># POST {"thing": "onair-office", "mode": 1}</span>
+iot.publish(topic=f"onair/{thing}/cmd",
+            qos=0, payload=json.dumps({"mode": mode}))
+
+<span class="c"># GET ?thing=onair-office</span>
+doc  = iot.get_thing_shadow(thingName=thing)
+mode = parse_reported_mode(doc)   <span class="c"># mode → output_mode → state</span></pre>
+    <div>
+      <ul class="points">
+        <li><b>POST</b> sends a command. The device doesn't have to be reachable from the internet, because it keeps an outbound MQTT connection open.</li>
+        <li><b>GET</b> returns the <em>last reported</em> state from the Device Shadow. The extension uses it to check the real state when the LAN is out of reach.</li>
+        <li>Shared bearer token, plus an optional <code>ALLOWED_THINGS</code> allowlist (403 otherwise).</li>
+        <li><code>parse_reported_mode()</code> uses the same mapping as the firmware and the extension, so <code>0/1/2</code> and <code>"off"/"on"/"breathing"</code> agree everywhere.</li>
+        <li>Unit tests in <code>test_lambda.py</code>; <code>validate-shadow.sh</code> checks the whole path without hardware.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 17 -->
+<section class="slide" id="ota" data-chapter="Delivery" data-title="OTA & partitions">
+  <h2>OTA updates and the flash layout</h2>
+  <p class="sub">4 MB of flash. Hover a region.</p>
+  <div class="flashmap" id="flashmap">
+    <div class="fm boot" style="flex:0.9" data-d="Bootloader + partition table (0x0–0x9000)">boot</div>
+    <div class="fm nvs" style="flex:0.5" data-d="nvs · 0x9000 · 20 KB: the cfg, mfg and aws_iot namespaces">nvs</div>
+    <div class="fm otad" style="flex:0.3" data-d="otadata · 0xE000 · 8 KB: which app slot to boot">ota</div>
+    <div class="fm app" style="flex:12.4" data-d="app0 · 0x10000 · 1.94 MB: OTA slot A">app0</div>
+    <div class="fm app alt" style="flex:12.4" data-d="app1 · 0x200000 · 1.94 MB: OTA slot B">app1</div>
+    <div class="fm sp" style="flex:0.4" data-d="spiffs · 64 KB: unused, kept only so tools are happy">fs</div>
+  </div>
+  <p class="info-box" id="fm-info">The stock layout spent 1.5 MB on an unused SPIFFS partition, and the app was 99% full. The custom table moves that space into the two app slots (~63% used).</p>
+  <div class="cols">
+    <ol class="steps static">
+      <li><code>POST /update</code> with a multipart <code>firmware</code> field (auth required; disabled in setup-AP mode).</li>
+      <li>The new image is written to the <em>inactive</em> slot, then <code>otadata</code> is switched to it.</li>
+      <li>The server replies <b>303 → <code>/update/done</code></b>, a plain GET page, so back and refresh are safe.</li>
+      <li>That page polls <code>/api/status</code> every second for up to 60 s and returns home once the device is back.</li>
+    </ol>
+    <div class="card"><p><b>One-time catch:</b> OTA can't change the partition table. Moving a device off the stock layout needs one USB flash of <code>merged.bin</code> at <code>0x0</code>; after that, OTA works as usual.</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ 18 -->
+<section class="slide" id="ci" data-chapter="Delivery" data-title="Build & CI">
+  <h2>Build and CI: proving the binary has no secrets</h2>
+  <div class="cols">
+    <div>
+      <ol class="steps static">
+        <li><b>Build matrix</b> in Docker (<code>arduino-cli</code>): XIAO and Beetle ESP32-C6. Version = tag name, or <code>date+sha</code>.</li>
+        <li><b>Secret-scan guard</b> runs <code>strings</code> on the ELF and fails on a real ATS endpoint, or on more than one PEM body.</li>
+        <li>Rename, <code>sha256sum</code>, upload artifacts.</li>
+        <li>On <code>v*</code> tags: a <b>GitHub Release</b> with every board's <code>.merged.bin</code>, <code>.bin</code> and <code>.elf</code>.</li>
+        <li>Optional: upload to S3 and create an AWS IoT Job (staged rollout, aborts at 25% failures). This is groundwork for future fleet OTA; the device-side Jobs handler isn't written yet.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h3>Why count lines starting with "MII"?</h3>
+      <p>Every real X.509 cert or private key is base64 of an ASN.1 SEQUENCE (first byte <code>0x30</code>), so its body starts with <code>MII</code>. HTML placeholders and mbedTLS marker strings have no body. Exactly one hit is allowed: Amazon Root CA 1.</p>
+      <label class="field">Test a string from the binary
+        <input id="scan-in" type="text" spellcheck="false" value="MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF">
+      </label>
+      <p class="info-box" id="scan-out"></p>
+      <div class="row wrap">
+        <button class="chip" data-scan="placeholder='-----BEGIN PRIVATE KEY-----'">placeholder</button>
+        <button class="chip" data-scan="a1b2c3d4e5f6g7-ats.iot.eu-west-1.amazonaws.com">real endpoint</button>
+        <button class="chip" data-scan="xxxx-ats.iot.&amp;lt;region&amp;gt;.amazonaws.com">HTML placeholder host</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 19 -->
+<section class="slide" id="principles" data-chapter="Wrap-up" data-title="Design principles">
+  <h2>The ideas behind it</h2>
+  <div class="grid4">
+    <div class="tile"><b>Fail dark</b><p>Pull-down resistor, OFF in <code>setup()</code>, mode not saved. A power blip never lights the sign by itself.</p></div>
+    <div class="tile"><b>Local first, cloud optional</b><p>The LAN API works with no account. AWS is a runtime opt-in, and <code>ENABLE_AWS_IOT=0</code> removes it entirely.</p></div>
+    <div class="tile"><b>No secrets in the artifact</b><p>Credentials live in NVS. CI checks every binary for endpoints and PEM bodies.</p></div>
+    <div class="tile"><b>One funnel, always reported</b><p>Every change goes through <code>setOutputMode()</code>, which publishes state and shadow, so the extension can correct drift.</p></div>
+    <div class="tile"><b>Self-healing</b><p>Wi-Fi supervisor, 15-minute reboot, portal timeout, MQTT backoff. No one has to power-cycle it.</p></div>
+    <div class="tile"><b>Physical recovery</b><p>BOOT holds and serial commands reset it even when the network is gone. A 15 s hold leaves no secrets behind.</p></div>
+    <div class="tile"><b>The sticker survives</b><p>Separate <code>mfg</code> namespace: a factory reset keeps the printed QR valid, and <code>stk_lock</code> hides it after deployment.</p></div>
+    <div class="tile"><b>Non-blocking ticks</b><p>A cooperative <code>loop()</code> keeps breathing, reset feedback, Wi-Fi and MQTT running side by side.</p></div>
+  </div>
+  <p class="end-links"><a href="https://github.com/mveplus/onair-led-sign-firmware">Firmware repo</a> · <a href="https://github.com/mveplus/onair-meeting-trigger">Meeting extension</a> · <a href="https://github.com/mveplus/onair-led-sign-firmware/releases">Releases</a></p>
+</section>
+
+</main>
+
+<nav class="bottombar" aria-label="Slide navigation">
+  <button class="icon-btn" id="btn-prev" aria-label="Previous slide">◀</button>
+  <div class="progress"><div id="progress-fill"></div></div>
+  <span class="counter" id="counter"></span>
+  <button class="icon-btn" id="btn-next" aria-label="Next slide">▶</button>
+</nav>
+
+<div class="overview" id="overview" hidden>
+  <div class="overview-inner">
+    <div class="overview-head"><h2>All slides</h2><button class="icon-btn" id="btn-close-ov" aria-label="Close">✕</button></div>
+    <ol id="overview-list"></ol>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
