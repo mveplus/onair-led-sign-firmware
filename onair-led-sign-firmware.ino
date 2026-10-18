@@ -35,6 +35,7 @@ REQUIRED LIBRARIES (as you installed)
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
+#include <nvs_flash.h>
 #include <ESPmDNS.h>
 #include <Update.h>
 #include <ArduinoJson.h>
@@ -125,6 +126,8 @@ static Preferences prefs;
 // RESET-MFG Serial command (in handleSerialStickerCommand) to rotate
 // the AP password when you actually want a new sticker.
 static Preferences mfg;
+
+void doDeepFactoryReset();  // erases the whole NVS partition; defined below
 
 // ---------------- State ----------------
 static bool portalMode = false;
@@ -508,23 +511,20 @@ void handleSerialStickerCommand() {
         Serial.println(out);
       } else if (cmd == "RESET-CFG") {
         // Standard factory reset equivalent (same as a 5 s BOOT hold).
-        // Clears the "cfg" namespace (Wi-Fi creds, auth, AWS, output
+        // Clears the "cfg" namespace (Wi-Fi creds, auth, output
         // settings) and reboots. The "mfg" namespace is preserved, so
         // the sticker password and stk_lock survive — your printed
-        // sticker stays valid.
+        // sticker stays valid. The AWS identity ("aws_iot") is kept too.
         Serial.println("RESET-CFG: clearing cfg namespace and rebooting");
         prefs.clear();
         delay(200);
         ESP.restart();
       } else if (cmd == "RESET-ALL") {
-        // Full wipe — clears both "cfg" and "mfg". Equivalent to the
-        // deep reset path. Rotates the AP password; any printed
-        // sticker becomes invalid.
-        Serial.println("RESET-ALL: clearing cfg + mfg namespaces and rebooting");
-        prefs.clear();
-        mfg.clear();
-        delay(200);
-        ESP.restart();
+        // Full wipe — same as the 15 s BOOT hold. Erases the whole NVS
+        // partition (cfg, mfg, aws_iot, Wi-Fi driver state). Rotates the
+        // AP password; any printed sticker becomes invalid.
+        Serial.println("RESET-ALL: erasing all NVS and rebooting");
+        doDeepFactoryReset();
       }
     } else if (buffer.length() < 64) {
       buffer += c;
@@ -1092,14 +1092,27 @@ void doFactoryReset() {
 }
 
 void doDeepFactoryReset() {
-  // Same as factory reset, plus wipes the "mfg" namespace — rotates the
-  // AP password and clears stk_lock. Any previously printed sticker
-  // becomes invalid; the next boot generates a fresh ap_pass and
-  // GET-STICKER is unlocked again.
-  Serial.println("\nDEEP FACTORY RESET: clearing cfg + mfg…");
+  // Erase the entire NVS partition: cfg, mfg (AP password + stk_lock),
+  // aws_iot (endpoint, Thing, per-device cert and private key), and
+  // anything the Wi-Fi stack or libraries stored. The device comes back
+  // as if freshly flashed: a new ap_pass is generated, any printed
+  // sticker becomes invalid and GET-STICKER is unlocked again.
+  Serial.println("\nDEEP FACTORY RESET: erasing all NVS…");
   ledWrite(true);
-  prefs.clear();
-  mfg.clear();
+  prefs.end();
+  mfg.end();
+  esp_err_t err = nvs_flash_erase();
+  if (err != ESP_OK) {
+    // Fall back to clearing every namespace we own, so the private key
+    // never survives a deep reset even if the partition erase fails.
+    Serial.print("nvs_flash_erase failed: ");
+    Serial.println(esp_err_to_name(err));
+    const char* namespaces[] = {"cfg", "mfg", "aws_iot"};
+    for (const char* ns : namespaces) {
+      Preferences p;
+      if (p.begin(ns, false)) { p.clear(); p.end(); }
+    }
+  }
   delay(300);
   ESP.restart();
 }
@@ -1110,6 +1123,7 @@ void doDeepFactoryReset() {
 // restart once the deadline passes.
 static bool     rebootPending = false;
 static uint32_t rebootAt      = 0;
+static bool     deepWipePending = false;  // erase all NVS when the reboot fires
 
 void scheduleReboot(uint32_t delayMs = 200) {
   Serial.print("Reboot scheduled in ");
@@ -1860,8 +1874,13 @@ void setupHttpHandlers() {
     String out;
     serializeJson(resp, out);
     request->send(200, "application/json", out);
-    prefs.clear();
-    if (deep) mfg.clear();
+    if (deep) {
+      // Erase from loop() once the response has flushed, so no other
+      // handler touches a Preferences handle after the partition is gone.
+      deepWipePending = true;
+    } else {
+      prefs.clear();
+    }
     scheduleReboot(400);
   });
 
@@ -2263,6 +2282,7 @@ void loop() {
   // Async deferred reboot — fires once the deadline scheduled by
   // scheduleReboot() passes, after async HTTP responses have flushed.
   if (rebootPending && (int32_t)(millis() - rebootAt) >= 0) {
+    if (deepWipePending) doDeepFactoryReset();  // erases NVS, then restarts
     Serial.println("Reboot due. Restarting.");
     ESP.restart();
   }

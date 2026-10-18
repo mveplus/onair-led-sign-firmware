@@ -14,7 +14,7 @@ This repo contains a single Arduino sketch. Prebuilt binaries are attached to ea
 - HTTP API to read status and control an output pin.
 - OTA firmware updates at `/update` (POST/Redirect/GET, browser-back safe).
 - mDNS advertising of the configured hostname.
-- Two-stage factory reset via BOOT long-press: 5 s = config only, 15 s = full wipe including sticker password. Serial and HTTP fallbacks for both.
+- Two-stage factory reset via BOOT long-press: 5 s = config only, 15 s = full wipe of all device storage (Wi-Fi, sticker password, AWS identity). Serial and HTTP fallbacks for both.
 - Optional breathing output mode using PWM.
 - Optional AWS IoT Core integration (MQTT cmd/state + Fleet Provisioning by Claim), credentials loaded at runtime from device NVS — no secrets in source or binaries.
 - Per-device Setup-AP password + printable Wi-Fi-join QR via `scripts/print-sticker.py`.
@@ -304,8 +304,10 @@ Three thresholds, depending on what you want to clear:
 
 Hold BOOT and release between 5 and 14 s.
 
-- Clears: Wi-Fi creds, auth, AWS config, output settings (NVS namespace `cfg`).
-- Preserves: setup-AP password and sticker lockout (NVS namespace `mfg`).
+- Clears: Wi-Fi creds, auth, API token, output settings (NVS namespace `cfg`).
+- Preserves: setup-AP password and sticker lockout (NVS namespace `mfg`),
+  and the AWS IoT identity (NVS namespace `aws_iot`; clear it with
+  `POST /api/aws/forget`).
   Your printed sticker QR stays valid.
 - LED: slow blink (500 ms toggle) during 0–5 s, switches to a fast blink
   (150 ms) between 5 and 15 s as a "release now to commit" cue.
@@ -314,7 +316,9 @@ Hold BOOT and release between 5 and 14 s.
 
 Keep holding BOOT past 15 s without releasing.
 
-- Clears: everything above PLUS the `mfg` namespace.
+- Erases the entire NVS partition: `cfg`, `mfg`, `aws_iot` (endpoint,
+  Thing name, per-device certificate and private key) and any Wi-Fi
+  driver state. The device comes back as if freshly flashed.
 - Rotates the setup-AP password; any printed sticker becomes invalid.
 - LED: goes solid at the 15 s mark; reset fires immediately.
 
@@ -325,7 +329,7 @@ Useful when the BOOT button isn't reachable or behaves badly:
 ```bash
 # Over USB Serial (no auth)
 echo 'RESET-CFG' > /dev/ttyACM0   # cfg only — equivalent to 5 s BOOT
-echo 'RESET-ALL' > /dev/ttyACM0   # cfg + mfg — equivalent to 15 s BOOT
+echo 'RESET-ALL' > /dev/ttyACM0   # erase all NVS — equivalent to 15 s BOOT
 echo 'RESET-MFG' > /dev/ttyACM0   # mfg only — rotate sticker, keep config
 
 # Over HTTP (auth required)

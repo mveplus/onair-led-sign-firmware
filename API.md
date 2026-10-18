@@ -97,11 +97,14 @@ POST /api/reboot
   chip restarts.
 
 POST /api/factory-reset[?deep=1]
-- Clears the `cfg` Preferences namespace (Wi-Fi creds, auth, AWS config,
-  output settings) and reboots. Same effect as a 5 s BOOT hold.
-- With `?deep=1`, also clears the `mfg` namespace — rotates the setup-AP
-  password and invalidates any printed sticker. Same effect as a 15 s
-  BOOT hold or `RESET-ALL` over Serial.
+- Clears the `cfg` Preferences namespace (Wi-Fi creds, auth, API token,
+  output settings) and reboots. Same effect as a 5 s BOOT hold. The
+  `mfg` (sticker) and `aws_iot` namespaces are kept.
+- With `?deep=1`, erases the entire NVS partition instead — `cfg`, `mfg`
+  and `aws_iot` (including the per-device private key). Rotates the
+  setup-AP password and invalidates any printed sticker. The erase runs
+  after the response is sent, just before the reboot. Same effect as a
+  15 s BOOT hold or `RESET-ALL` over Serial.
 - Auth required.
 - Response fields: `ok`, `deep`, `rebooting`.
 
